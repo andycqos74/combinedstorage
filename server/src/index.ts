@@ -29,7 +29,7 @@ app.use(
     cookie: {
       httpOnly: true,
       sameSite: 'lax',
-      secure: config.isProd,
+      secure: config.cookieSecure,
       maxAge: 7 * 24 * 60 * 60 * 1000,
     },
   }),

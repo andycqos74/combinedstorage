@@ -76,15 +76,44 @@ Sign in with the `ADMIN_USERNAME` / `ADMIN_PASSWORD` from your `.env` (defaults 
 `changeme`). Then open **Storage**, add one or two local backends (give each a name and a quota),
 switch to **Files**, and start creating folders and uploading.
 
+## Run with Docker
+
+The image bundles the built API and web UI into one service; `docker compose` runs it with a
+persistent named volume for your data (the SQLite DB + local-backend blobs).
+
+```bash
+cp .env.example .env          # optional — override admin creds, secret, OneDrive, etc.
+docker compose up --build
+# open http://localhost:4000
+```
+
+- **Data persists** in the `combinedstorage-data` volume across restarts. `docker compose down`
+  stops it; add `-v` to also delete the volume (wipe all files).
+- **Override settings** from your shell or a `.env` file beside `docker-compose.yml`, e.g.
+  `ADMIN_PASSWORD=s3cret SESSION_SECRET=$(openssl rand -hex 32) docker compose up --build`.
+- **HTTP vs HTTPS**: `COOKIE_SECURE` defaults to `false` so login works over plain HTTP while
+  testing. Behind an HTTPS reverse proxy, set `COOKIE_SECURE=true` and point `PUBLIC_BASE_URL`
+  (and `MS_REDIRECT_URI`) at your real URL.
+- **OneDrive**: set `MS_CLIENT_ID` / `MS_CLIENT_SECRET` (see *Connecting OneDrive*) and make sure
+  the Azure app's redirect URI matches `MS_REDIRECT_URI`.
+
+To build/run the image directly without compose:
+
+```bash
+docker build -t combinedstorage .
+docker run --rm -p 4000:4000 -e COOKIE_SECURE=false -v combinedstorage-data:/data combinedstorage
+```
+
 ## Configuration (`.env`)
 
 | Variable | Purpose | Default |
 | --- | --- | --- |
 | `PORT` | Server port | `4000` |
 | `PUBLIC_BASE_URL` | Base URL used to build public CDN links | `http://localhost:4000` |
-| `DATA_DIR` | Where the SQLite DB and local blobs live (relative to `server/`) | `./data` |
+| `DATA_DIR` | SQLite DB + local blobs (relative to `server/`, or an absolute path) | `./data` |
 | `ADMIN_USERNAME` / `ADMIN_PASSWORD` | Admin login | `admin` / `changeme` |
 | `SESSION_SECRET` | Signs the session cookie — set a long random value | _dev placeholder_ |
+| `COOKIE_SECURE` | Require HTTPS for the session cookie | on when `NODE_ENV=production` |
 | `MS_CLIENT_ID` / `MS_CLIENT_SECRET` | Azure app credentials (OneDrive) | _empty (OneDrive off)_ |
 | `MS_TENANT` | `common` (personal + work/school) or a tenant id | `common` |
 | `MS_REDIRECT_URI` | OAuth callback URL | `http://localhost:4000/api/oauth/onedrive/callback` |

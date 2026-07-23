@@ -46,6 +46,12 @@ export const config = {
   },
   sessionSecret: process.env.SESSION_SECRET || 'dev-insecure-session-secret-change-me',
   isProd: process.env.NODE_ENV === 'production',
+  // Whether the session cookie requires HTTPS. Defaults to on in production, but can be
+  // forced off (COOKIE_SECURE=false) to test over plain HTTP, e.g. a local Docker container.
+  cookieSecure:
+    process.env.COOKIE_SECURE !== undefined
+      ? process.env.COOKIE_SECURE.toLowerCase() === 'true'
+      : process.env.NODE_ENV === 'production',
   microsoft:
     msClientId && msClientSecret
       ? ({

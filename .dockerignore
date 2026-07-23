@@ -1,0 +1,25 @@
+# Dependencies and build outputs are produced inside the image
+node_modules
+**/node_modules
+dist
+**/dist
+
+# Runtime data (SQLite DB + local blobs) — lives in a volume, never in the image
+server/data
+data
+
+# Local config / secrets
+.env
+.env.local
+
+# VCS / editor / meta
+.git
+.gitignore
+.dockerignore
+Dockerfile
+docker-compose.yml
+*.md
+.vscode
+.idea
+.DS_Store
+npm-debug.log*
