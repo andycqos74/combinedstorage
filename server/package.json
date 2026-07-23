@@ -1,0 +1,31 @@
+{
+  "name": "@combinedstorage/server",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Combined storage API: unified file tree over multiple storage backends, plus CDN file serving.",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@azure/msal-node": "^2.16.2",
+    "better-sqlite3": "^11.8.0",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "express-session": "^1.18.1",
+    "mime-types": "^2.1.35"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/express": "^4.17.21",
+    "@types/express-session": "^1.18.1",
+    "@types/mime-types": "^2.1.4",
+    "@types/node": "^22.10.5",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3",
+    "vitest": "^2.1.8"
+  }
+}

@@ -1,0 +1,18 @@
+node_modules/
+dist/
+build/
+*.log
+npm-debug.log*
+
+# Secrets / local config
+.env
+.env.local
+
+# Runtime data: sqlite db + local storage blobs
+server/data/
+data/
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/
