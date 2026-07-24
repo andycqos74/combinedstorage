@@ -20,6 +20,10 @@ const port = Number(process.env.PORT || 4000);
 const dataDir = resolveDataDir();
 fs.mkdirSync(dataDir, { recursive: true });
 
+// The externally-reachable base URL (e.g. https://file.example.com behind a tunnel/proxy).
+// Public CDN links and, by default, the OAuth callback URLs are built from this.
+const publicBaseUrl = (process.env.PUBLIC_BASE_URL || `http://localhost:${port}`).replace(/\/+$/, '');
+
 const msClientId = process.env.MS_CLIENT_ID?.trim();
 const msClientSecret = process.env.MS_CLIENT_SECRET?.trim();
 const googleClientId = process.env.GOOGLE_CLIENT_ID?.trim();
@@ -42,7 +46,7 @@ export interface GoogleConfig {
 
 export const config = {
   port,
-  publicBaseUrl: (process.env.PUBLIC_BASE_URL || `http://localhost:${port}`).replace(/\/+$/, ''),
+  publicBaseUrl,
   dataDir,
   dbPath: path.join(dataDir, 'combined.db'),
   /** Base directory under which local backends store their blobs (one subdir per backend). */
@@ -68,7 +72,7 @@ export const config = {
           clientSecret: msClientSecret,
           tenant: process.env.MS_TENANT || 'common',
           redirectUri:
-            process.env.MS_REDIRECT_URI || `http://localhost:${port}/api/oauth/onedrive/callback`,
+            process.env.MS_REDIRECT_URI || `${publicBaseUrl}/api/oauth/onedrive/callback`,
           scopes: (process.env.MS_SCOPES || 'Files.ReadWrite offline_access User.Read')
             .split(/\s+/)
             .filter(Boolean),
@@ -80,7 +84,7 @@ export const config = {
           clientId: googleClientId,
           clientSecret: googleClientSecret,
           redirectUri:
-            process.env.GOOGLE_REDIRECT_URI || `http://localhost:${port}/api/oauth/google/callback`,
+            process.env.GOOGLE_REDIRECT_URI || `${publicBaseUrl}/api/oauth/google/callback`,
           scopes: (
             process.env.GOOGLE_SCOPES || 'https://www.googleapis.com/auth/drive.file openid email'
           )

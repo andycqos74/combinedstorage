@@ -18,7 +18,9 @@ services:
     environment:
       PORT: "4000"
       DATA_DIR: "/data"
-      # How you reach the app — used to build public CDN links and the OAuth redirect.
+      # How you reach the app from a browser. Behind a tunnel/proxy set this to your public
+      # HTTPS URL (e.g. https://file.amcmail.co.uk); CDN links and the OAuth callback URLs
+      # are built from it.
       PUBLIC_BASE_URL: "${PUBLIC_BASE_URL:-http://localhost:4000}"
       # Admin login — CHANGE THESE for anything beyond local testing.
       ADMIN_USERNAME: "${ADMIN_USERNAME:-admin}"
@@ -31,14 +33,26 @@ services:
       MS_CLIENT_ID: "${MS_CLIENT_ID:-}"
       MS_CLIENT_SECRET: "${MS_CLIENT_SECRET:-}"
       MS_TENANT: "${MS_TENANT:-common}"
-      MS_REDIRECT_URI: "${MS_REDIRECT_URI:-http://localhost:4000/api/oauth/onedrive/callback}"
+      # Leave the redirect URIs empty to derive them from PUBLIC_BASE_URL
+      # (…/api/oauth/onedrive/callback). Set explicitly only to override.
+      MS_REDIRECT_URI: "${MS_REDIRECT_URI:-}"
       # ---- Google Drive (optional): fill these in to enable "Connect Google Drive" ----
       GOOGLE_CLIENT_ID: "${GOOGLE_CLIENT_ID:-}"
       GOOGLE_CLIENT_SECRET: "${GOOGLE_CLIENT_SECRET:-}"
-      GOOGLE_REDIRECT_URI: "${GOOGLE_REDIRECT_URI:-http://localhost:4000/api/oauth/google/callback}"
+      GOOGLE_REDIRECT_URI: "${GOOGLE_REDIRECT_URI:-}"
     volumes:
       - combinedstorage-data:/data
+    networks:
+      - default # keeps outbound internet access (OneDrive/Google APIs)
+      - tunnel # so cloudflared can reach this container at combinedstorage:4000
     restart: unless-stopped
 
 volumes:
   combinedstorage-data:
+
+networks:
+  # Existing Cloudflare Tunnel network (created by the cloudflared stack). The tunnel's
+  # ingress should point file.amcmail.co.uk -> http://combinedstorage:4000.
+  tunnel:
+    name: cloudflared-combinedstorage_default
+    external: true

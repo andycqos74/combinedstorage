@@ -107,6 +107,27 @@ docker build -t combinedstorage .
 docker run --rm -p 4000:4000 -e COOKIE_SECURE=false -v combinedstorage-data:/data combinedstorage
 ```
 
+### Behind a reverse proxy / Cloudflare Tunnel (HTTPS)
+
+To serve the app at a public HTTPS hostname (e.g. `https://file.example.com` via `cloudflared`):
+
+1. **Set `PUBLIC_BASE_URL`** to the public URL, e.g. `PUBLIC_BASE_URL=https://file.example.com`.
+   The OAuth callback URLs are derived from it automatically
+   (`https://file.example.com/api/oauth/onedrive/callback` and `…/google/callback`) — so leave
+   `MS_REDIRECT_URI` / `GOOGLE_REDIRECT_URI` unset.
+2. **Register those callback URLs** in the Azure app and the Google OAuth client (they must match
+   exactly), and add the hostname to Google's *Authorized JavaScript origins* if prompted.
+3. **Join the proxy's Docker network** so it can reach the container. The bundled
+   `docker-compose.yml` attaches to an external network named `cloudflared-combinedstorage_default`
+   and keeps the default network for outbound API calls; point the tunnel's ingress at
+   `http://combinedstorage:4000`. Adjust the network name to match yours.
+4. The app trusts `X-Forwarded-Proto` (`trust proxy` is on). Login works with `COOKIE_SECURE=false`
+   over the tunnel; set `COOKIE_SECURE=true` to mark the cookie Secure (requires the proxy to
+   forward `X-Forwarded-Proto: https`, which cloudflared does).
+
+Because the app writes everything to the `/data` volume, connected accounts and files persist
+across restarts and redeploys (only removing the `combinedstorage-data` volume wipes them).
+
 ## Configuration (`.env`)
 
 | Variable | Purpose | Default |
