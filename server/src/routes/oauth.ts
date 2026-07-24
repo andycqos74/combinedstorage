@@ -4,9 +4,39 @@ import { config } from '../config';
 import { asyncHandler } from '../util/asyncHandler';
 import { getAuthorizeUrl as oneDriveAuthorizeUrl, connectFromCode as connectOneDrive } from '../storage/onedrive';
 import { getGoogleAuthorizeUrl, connectFromCode as connectGoogle } from '../storage/googledrive';
-import { createBackend } from '../models/backends';
+import {
+  createBackend,
+  findBackendByAccount,
+  updateBackendConfig,
+  setBackendStatus,
+  setBackendEnabled,
+  type BackendType,
+} from '../models/backends';
 
 export const oauthRouter = Router();
+
+/**
+ * Register a freshly-connected cloud account: update the existing backend for that account if
+ * we already have one (a reconnect), otherwise create a new backend. Returns the outcome so the
+ * redirect can reflect it. This is what lets several *different* accounts of the same type
+ * coexist while reconnecting the *same* account never duplicates it.
+ */
+function upsertCloudBackend(
+  type: BackendType,
+  accountKey: string,
+  name: string,
+  cfg: unknown,
+): 'connected' | 'reconnected' {
+  const existing = findBackendByAccount(type, accountKey);
+  if (existing) {
+    updateBackendConfig(existing.id, cfg);
+    setBackendStatus(existing.id, 'connected');
+    setBackendEnabled(existing.id, true);
+    return 'reconnected';
+  }
+  createBackend({ name, type, config: cfg });
+  return 'connected';
+}
 
 /** Validate an OAuth callback and return the auth code, or respond with an error and return null. */
 function callbackCode(req: Request, res: Response): string | null {
@@ -55,9 +85,9 @@ oauthRouter.get(
     }
     const code = callbackCode(req, res);
     if (!code) return;
-    const { backendName, config: cfg } = await connectOneDrive(code);
-    createBackend({ name: backendName, type: 'onedrive', config: cfg });
-    res.redirect('/?connected=onedrive');
+    const { backendName, accountKey, config: cfg } = await connectOneDrive(code);
+    const outcome = upsertCloudBackend('onedrive', accountKey, backendName, cfg);
+    res.redirect(`/?${outcome}=onedrive`);
   }),
 );
 
@@ -89,8 +119,8 @@ oauthRouter.get(
     }
     const code = callbackCode(req, res);
     if (!code) return;
-    const { backendName, config: cfg } = await connectGoogle(code);
-    createBackend({ name: backendName, type: 'googledrive', config: cfg });
-    res.redirect('/?connected=googledrive');
+    const { backendName, accountKey, config: cfg } = await connectGoogle(code);
+    const outcome = upsertCloudBackend('googledrive', accountKey, backendName, cfg);
+    res.redirect(`/?${outcome}=googledrive`);
   }),
 );

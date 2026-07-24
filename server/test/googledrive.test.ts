@@ -11,7 +11,8 @@ describe('Google Drive OAuth', () => {
     expect(p.get('redirect_uri')).toContain('/api/oauth/google/callback');
     expect(p.get('response_type')).toBe('code');
     expect(p.get('access_type')).toBe('offline'); // required to receive a refresh token
-    expect(p.get('prompt')).toBe('consent');
+    expect(p.get('prompt')).toContain('consent'); // refresh token
+    expect(p.get('prompt')).toContain('select_account'); // lets a different account be added
     expect(p.get('scope')).toContain('drive.file');
     expect(p.get('state')).toBe('state-123');
   });

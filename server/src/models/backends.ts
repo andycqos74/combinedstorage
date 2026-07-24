@@ -63,3 +63,26 @@ export function deleteBackend(id: string): void {
 export function backendConfig<T = Record<string, unknown>>(row: BackendRow): T {
   return JSON.parse(row.config) as T;
 }
+
+/**
+ * Find an existing backend of the given type for a specific cloud account, so a reconnect
+ * updates it instead of creating a duplicate. The account is identified by a provider-specific
+ * key stored in the config (OneDrive: homeAccountId; Google: accountId).
+ */
+export function findBackendByAccount(type: BackendType, accountKey: string): BackendRow | undefined {
+  for (const row of listBackends()) {
+    if (row.type !== type) continue;
+    try {
+      const cfg = JSON.parse(row.config) as {
+        accountKey?: string;
+        homeAccountId?: string;
+        accountId?: string;
+      };
+      const key = cfg.accountKey ?? cfg.homeAccountId ?? cfg.accountId;
+      if (key && key === accountKey) return row;
+    } catch {
+      // ignore rows with unparseable config
+    }
+  }
+  return undefined;
+}

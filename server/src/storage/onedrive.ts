@@ -54,13 +54,24 @@ function makeCca(cacheData?: string): ConfidentialClientApplication {
 
 export async function getAuthorizeUrl(state: string): Promise<string> {
   const ms = requireMicrosoft();
-  return makeCca().getAuthCodeUrl({ scopes: ms.scopes, redirectUri: ms.redirectUri, state });
+  return makeCca().getAuthCodeUrl({
+    scopes: ms.scopes,
+    redirectUri: ms.redirectUri,
+    state,
+    // Always show the account picker so a *different* account can be connected instead of
+    // silently reusing whoever is already signed in to this browser.
+    prompt: 'select_account',
+  });
 }
 
-/** Exchange an auth code for tokens and build a ready-to-store backend config. */
+/**
+ * Exchange an auth code for tokens and build a ready-to-store backend config. `accountKey`
+ * (the MSAL homeAccountId) uniquely identifies the connected account so a reconnect updates
+ * the existing backend instead of creating a duplicate.
+ */
 export async function connectFromCode(
   code: string,
-): Promise<{ backendName: string; config: OneDriveConfig }> {
+): Promise<{ backendName: string; accountKey: string; config: OneDriveConfig }> {
   const ms = requireMicrosoft();
   const cca = makeCca();
   const result = await cca.acquireTokenByCode({
@@ -77,7 +88,11 @@ export async function connectFromCode(
     account: result.account.username,
     driveId: drive.id,
   };
-  return { backendName: `OneDrive (${result.account.username})`, config: cfg };
+  return {
+    backendName: `OneDrive (${result.account.username})`,
+    accountKey: result.account.homeAccountId,
+    config: cfg,
+  };
 }
 
 // ---- Graph REST helpers ----------------------------------------------------

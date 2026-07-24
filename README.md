@@ -162,6 +162,21 @@ Google Drive requires a free Google Cloud OAuth client (you supply the credentia
 The default `drive.file` scope limits the app to files it creates in your Drive (least privilege);
 uploads are streamed back out through the stable `/f/<token>` URL.
 
+## Connecting multiple accounts
+
+You can connect several accounts of the same type — every account's capacity adds to the combined
+pool. Each **Connect** click shows an account picker, so pick **Use another account** to add a
+different one. Reconnecting an account you've already added just refreshes its tokens (it is matched
+by a stable account id, so it never creates a duplicate).
+
+**"Need admin approval" (OneDrive work/school accounts).** Signing in with an organisation account
+(e.g. `you@company.com`) can show a Microsoft *"Need admin approval"* screen. That is your
+organisation's Azure AD consent policy blocking unverified third-party apps — the app cannot
+override it. Options: use a **personal** Microsoft account instead; ask your Azure AD admin to grant
+consent (the *"Have an admin account? Sign in"* link on that screen, or an admin-consent request);
+or have the admin allow user consent for the app. Personal Microsoft accounts and Google accounts
+do not hit this.
+
 ## Using files as a CDN
 
 Every uploaded file gets an unguessable public URL: `GET {PUBLIC_BASE_URL}/f/<token>`. It requires

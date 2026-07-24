@@ -16,6 +16,8 @@ export interface GoogleDriveConfig {
   /** Long-lived refresh token; access tokens are minted from it on demand. */
   refreshToken: string;
   account?: string;
+  /** Stable Google user id (`sub`), used to recognise a reconnect of the same account. */
+  accountId?: string;
 }
 
 const DRIVE = 'https://www.googleapis.com/drive/v3';
@@ -44,7 +46,9 @@ export function getGoogleAuthorizeUrl(state: string): string {
     response_type: 'code',
     scope: g.scopes.join(' '),
     access_type: 'offline', // ask for a refresh token
-    prompt: 'consent', // force consent so a refresh token is always returned
+    // Show the account chooser (so a different account can be added) and force consent
+    // (so a refresh token is always returned).
+    prompt: 'select_account consent',
     include_granted_scopes: 'true',
     state,
   });
@@ -61,10 +65,14 @@ async function tokenRequest(body: Record<string, string>): Promise<any> {
   return res.json();
 }
 
-/** Exchange an auth code for a refresh token and build a ready-to-store backend config. */
+/**
+ * Exchange an auth code for a refresh token and build a ready-to-store backend config.
+ * `accountKey` (the Google `sub`) uniquely identifies the account so a reconnect updates the
+ * existing backend instead of creating a duplicate.
+ */
 export async function connectFromCode(
   code: string,
-): Promise<{ backendName: string; config: GoogleDriveConfig }> {
+): Promise<{ backendName: string; accountKey: string; config: GoogleDriveConfig }> {
   const g = requireGoogle();
   const tok = await tokenRequest({
     code,
@@ -80,18 +88,24 @@ export async function connectFromCode(
   }
 
   let account: string | undefined;
+  let accountId: string | undefined;
   try {
     const info = await fetch(USERINFO_URL, {
       headers: { Authorization: `Bearer ${tok.access_token}` },
     });
-    if (info.ok) account = ((await info.json()) as { email?: string }).email;
+    if (info.ok) {
+      const data = (await info.json()) as { email?: string; sub?: string };
+      account = data.email;
+      accountId = data.sub;
+    }
   } catch {
     // identity is best-effort
   }
 
   return {
     backendName: `Google Drive (${account ?? 'account'})`,
-    config: { refreshToken: tok.refresh_token, account },
+    accountKey: accountId ?? account ?? tok.refresh_token,
+    config: { refreshToken: tok.refresh_token, account, accountId },
   };
 }
 
