@@ -20,9 +20,12 @@ import { BadRequestError, NotFoundError } from '../util/errors';
 export const adminRouter = Router();
 const json = express.json();
 
-// Small bits of server state the admin UI needs (e.g. whether OneDrive can be connected).
+// Small bits of server state the admin UI needs (which cloud backends can be connected).
 adminRouter.get('/meta', (_req, res) => {
-  res.json({ oneDriveConfigured: !!config.microsoft });
+  res.json({
+    oneDriveConfigured: !!config.microsoft,
+    googleDriveConfigured: !!config.google,
+  });
 });
 
 // List all backends with live usage (includes disabled/errored ones for the admin view).

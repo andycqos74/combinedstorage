@@ -108,7 +108,8 @@ export const api = {
   remove: (id: string) => req<{ ok: true }>(`/api/files/${id}`, { method: 'DELETE' }),
   upload,
 
-  meta: () => req<{ oneDriveConfigured: boolean }>('/api/admin/meta'),
+  meta: () =>
+    req<{ oneDriveConfigured: boolean; googleDriveConfigured: boolean }>('/api/admin/meta'),
   backends: () => req<BackendUsage[]>('/api/admin/backends'),
   addLocal: (name: string, quotaBytes: number) =>
     req<BackendUsage>('/api/admin/backends/local', { method: 'POST', ...jsonBody({ name, quotaBytes }) }),

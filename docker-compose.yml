@@ -32,6 +32,10 @@ services:
       MS_CLIENT_SECRET: "${MS_CLIENT_SECRET:-}"
       MS_TENANT: "${MS_TENANT:-common}"
       MS_REDIRECT_URI: "${MS_REDIRECT_URI:-http://localhost:4000/api/oauth/onedrive/callback}"
+      # ---- Google Drive (optional): fill these in to enable "Connect Google Drive" ----
+      GOOGLE_CLIENT_ID: "${GOOGLE_CLIENT_ID:-}"
+      GOOGLE_CLIENT_SECRET: "${GOOGLE_CLIENT_SECRET:-}"
+      GOOGLE_REDIRECT_URI: "${GOOGLE_REDIRECT_URI:-http://localhost:4000/api/oauth/google/callback}"
     volumes:
       - combinedstorage-data:/data
     restart: unless-stopped

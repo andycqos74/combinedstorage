@@ -7,7 +7,12 @@ const DATA_DIR = path.join(os.tmpdir(), `combinedstorage-vitest-${process.pid}`)
 
 export default defineConfig({
   test: {
-    env: { DATA_DIR },
+    // Dummy Google creds so config.google is populated for the OAuth-URL test.
+    env: {
+      DATA_DIR,
+      GOOGLE_CLIENT_ID: 'test-google-client',
+      GOOGLE_CLIENT_SECRET: 'test-google-secret',
+    },
     include: ['test/**/*.test.ts'],
     fileParallelism: false,
   },

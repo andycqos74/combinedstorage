@@ -385,8 +385,28 @@ main {
   color: #1971c2;
 }
 .badge-onedrive {
+  background: #e7f0ff;
+  color: #1c56c9;
+}
+.badge-googledrive {
   background: #e6fcf5;
   color: #0ca678;
+}
+
+/* Cloud connect rows (admin) */
+.cloud-connect {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+.cloud-label {
+  font-weight: 600;
+  min-width: 96px;
+}
+.cloud-connect .notice {
+  flex: 1;
 }
 .backend-actions {
   display: flex;

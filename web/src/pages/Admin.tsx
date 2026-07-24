@@ -7,6 +7,7 @@ export function Admin() {
   const [backends, setBackends] = useState<BackendUsage[]>([]);
   const [usage, setUsage] = useState<Usage | null>(null);
   const [oneDriveConfigured, setOneDriveConfigured] = useState(false);
+  const [googleConfigured, setGoogleConfigured] = useState(false);
   const [name, setName] = useState('');
   const [quotaGB, setQuotaGB] = useState('1');
   const [error, setError] = useState('');
@@ -19,6 +20,7 @@ export function Admin() {
       setBackends(b);
       setUsage(u);
       setOneDriveConfigured(m.oneDriveConfigured);
+      setGoogleConfigured(m.googleDriveConfigured);
     } catch (err) {
       setError(errorMessage(err));
     }
@@ -135,19 +137,37 @@ export function Admin() {
         <div className="card">
           <h3>Connect a cloud backend</h3>
           <p className="muted small">
-            Connect a OneDrive account. Its capacity is added to the combined pool and new uploads
-            can land there automatically.
+            Connect a cloud account. Its capacity is added to the combined pool and new uploads can
+            land there automatically.
           </p>
-          {oneDriveConfigured ? (
-            <a className="button primary" href="/api/oauth/onedrive/start">
-              Connect OneDrive
-            </a>
-          ) : (
-            <div className="notice">
-              OneDrive isn't configured on the server. Set <code>MS_CLIENT_ID</code> and{' '}
-              <code>MS_CLIENT_SECRET</code> in the server <code>.env</code> to enable it.
-            </div>
-          )}
+
+          <div className="cloud-connect">
+            <span className="cloud-label">OneDrive</span>
+            {oneDriveConfigured ? (
+              <a className="button primary" href="/api/oauth/onedrive/start">
+                Connect OneDrive
+              </a>
+            ) : (
+              <div className="notice">
+                Not configured. Set <code>MS_CLIENT_ID</code> / <code>MS_CLIENT_SECRET</code> in the
+                server <code>.env</code>.
+              </div>
+            )}
+          </div>
+
+          <div className="cloud-connect">
+            <span className="cloud-label">Google Drive</span>
+            {googleConfigured ? (
+              <a className="button primary" href="/api/oauth/google/start">
+                Connect Google Drive
+              </a>
+            ) : (
+              <div className="notice">
+                Not configured. Set <code>GOOGLE_CLIENT_ID</code> / <code>GOOGLE_CLIENT_SECRET</code>{' '}
+                in the server <code>.env</code>.
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </div>

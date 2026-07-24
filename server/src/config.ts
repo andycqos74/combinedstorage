@@ -22,11 +22,20 @@ fs.mkdirSync(dataDir, { recursive: true });
 
 const msClientId = process.env.MS_CLIENT_ID?.trim();
 const msClientSecret = process.env.MS_CLIENT_SECRET?.trim();
+const googleClientId = process.env.GOOGLE_CLIENT_ID?.trim();
+const googleClientSecret = process.env.GOOGLE_CLIENT_SECRET?.trim();
 
 export interface MicrosoftConfig {
   clientId: string;
   clientSecret: string;
   tenant: string;
+  redirectUri: string;
+  scopes: string[];
+}
+
+export interface GoogleConfig {
+  clientId: string;
+  clientSecret: string;
   redirectUri: string;
   scopes: string[];
 }
@@ -64,6 +73,20 @@ export const config = {
             .split(/\s+/)
             .filter(Boolean),
         } satisfies MicrosoftConfig)
+      : null,
+  google:
+    googleClientId && googleClientSecret
+      ? ({
+          clientId: googleClientId,
+          clientSecret: googleClientSecret,
+          redirectUri:
+            process.env.GOOGLE_REDIRECT_URI || `http://localhost:${port}/api/oauth/google/callback`,
+          scopes: (
+            process.env.GOOGLE_SCOPES || 'https://www.googleapis.com/auth/drive.file openid email'
+          )
+            .split(/\s+/)
+            .filter(Boolean),
+        } satisfies GoogleConfig)
       : null,
 } as const;
 

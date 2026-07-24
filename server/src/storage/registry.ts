@@ -1,6 +1,7 @@
 import type { StorageProvider } from './provider';
 import { LocalProvider, type LocalConfig } from './local';
 import { OneDriveProvider } from './onedrive';
+import { GoogleDriveProvider } from './googledrive';
 import { type BackendRow, backendConfig } from '../models/backends';
 
 /**
@@ -13,6 +14,8 @@ export function providerFor(row: BackendRow): StorageProvider {
       return new LocalProvider(row.id, backendConfig<LocalConfig>(row));
     case 'onedrive':
       return new OneDriveProvider(row);
+    case 'googledrive':
+      return new GoogleDriveProvider(row);
     default:
       throw new Error(`Unknown backend type: ${row.type}`);
   }

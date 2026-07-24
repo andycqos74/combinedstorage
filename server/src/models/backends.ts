@@ -1,7 +1,7 @@
 import { db } from '../db';
 import { newId, nowIso } from '../util/ids';
 
-export type BackendType = 'local' | 'onedrive';
+export type BackendType = 'local' | 'onedrive' | 'googledrive';
 
 export interface BackendRow {
   id: string;

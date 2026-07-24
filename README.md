@@ -1,13 +1,14 @@
 # Combined Storage
 
 An online storage system that presents **several independent storage backends as one unified
-drive**. Connect a local disk and a OneDrive account (with more provider types to come) and the
-web app shows a single file tree and a single, combined capacity — a 1 GB local quota plus a
-1 GB OneDrive appears as 2 GB. Uploads are placed automatically on whichever backend has room,
-and every file is reachable at a stable public URL so the system also works as a CDN.
+drive**. Connect a local disk, a OneDrive account, and a Google Drive account (with more provider
+types to come) and the web app shows a single file tree and a single, combined capacity — a 1 GB
+local quota plus a 1 GB OneDrive appears as 2 GB. Uploads are placed automatically on whichever
+backend has room, and every file is reachable at a stable public URL so the system also works as
+a CDN.
 
-> Proof of concept: single admin user, backends = **local disk + OneDrive**. The architecture is
-> built so adding Google Drive, S3, etc. is "one new provider file + one admin form".
+> Proof of concept: single admin user, backends = **local disk + OneDrive + Google Drive**. The
+> architecture is built so adding S3, etc. is "one new provider file + one admin form".
 
 ## How it works
 
@@ -32,7 +33,7 @@ Browser (React SPA)
 Express server (TypeScript)
    ├─ routes/     auth · files · admin · oauth · cdn
    ├─ services/   placement (most-free-space) · files · quota (aggregate)
-   ├─ storage/    StorageProvider ── local.ts · onedrive.ts (Microsoft Graph)
+   ├─ storage/    StorageProvider ── local.ts · onedrive.ts (Graph) · googledrive.ts (Drive API)
    └─ db/         SQLite metadata (tree + backend registry)
 ```
 
@@ -41,13 +42,15 @@ Express server (TypeScript)
 - File manager: browse folders, **create folder, upload (drag-and-drop or picker), rename,
   delete**, copy a file's public link.
 - Combined storage meter across all connected backends.
-- Admin page to **add local-disk backends** and **connect OneDrive**, enable/disable or remove them.
+- Admin page to **add local-disk backends** and **connect OneDrive / Google Drive**, enable/disable
+  or remove them.
 - Automatic upload placement (most-free-space first) with a clear "insufficient space" error.
 - Public, cacheable file URLs with HTTP **Range** support (media seeking) and ETag/`304`.
 
 ## Tech stack
 
-Node.js + TypeScript · Express · better-sqlite3 · @azure/msal-node (OneDrive OAuth) · React + Vite.
+Node.js + TypeScript · Express · better-sqlite3 · @azure/msal-node (OneDrive OAuth) · Google Drive
+API v3 (OAuth2 via `fetch`) · React + Vite.
 
 ## Prerequisites
 
@@ -118,6 +121,9 @@ docker run --rm -p 4000:4000 -e COOKIE_SECURE=false -v combinedstorage-data:/dat
 | `MS_TENANT` | `common` (personal + work/school) or a tenant id | `common` |
 | `MS_REDIRECT_URI` | OAuth callback URL | `http://localhost:4000/api/oauth/onedrive/callback` |
 | `MS_SCOPES` | Delegated Graph scopes | `Files.ReadWrite offline_access User.Read` |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Google OAuth client (Google Drive) | _empty (off)_ |
+| `GOOGLE_REDIRECT_URI` | OAuth callback URL | `http://localhost:4000/api/oauth/google/callback` |
+| `GOOGLE_SCOPES` | Drive OAuth scopes | `…/auth/drive.file openid email` |
 
 ## Connecting OneDrive
 
@@ -136,6 +142,25 @@ OneDrive requires a free Azure app registration (you supply the credentials):
 
 Uploads that land on OneDrive are stored under a `CombinedStorage/` app folder; the app streams
 them back out through the stable `/f/<token>` URL.
+
+## Connecting Google Drive
+
+Google Drive requires a free Google Cloud OAuth client (you supply the credentials):
+
+1. In the [Google Cloud Console](https://console.cloud.google.com) create/select a project and
+   **enable the "Google Drive API"** (APIs & Services → Library).
+2. Configure the **OAuth consent screen** (External is fine for testing; add your Google account
+   as a test user).
+3. Create an **OAuth client ID** → application type **Web application**, with **Authorized redirect
+   URI** exactly your `GOOGLE_REDIRECT_URI` (`http://localhost:4000/api/oauth/google/callback` for
+   local dev).
+4. Put the client ID and secret into `.env` as `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`, then
+   restart the server.
+5. In the app, open **Storage → Connect Google Drive**, sign in and consent. The account appears
+   as a backend and its real quota joins the combined pool.
+
+The default `drive.file` scope limits the app to files it creates in your Drive (least privilege);
+uploads are streamed back out through the stable `/f/<token>` URL.
 
 ## Using files as a CDN
 
@@ -157,7 +182,7 @@ Management endpoints require the admin session cookie; `/f/:token` is public.
 | `PATCH /api/files/:id/rename` · `PATCH /api/files/:id/move` · `DELETE /api/files/:id` | Modify |
 | `GET /api/admin/backends` · `POST /api/admin/backends/local` | Manage backends |
 | `PATCH /api/admin/backends/:id` · `DELETE /api/admin/backends/:id` | Enable/disable, remove |
-| `GET /api/oauth/onedrive/start` → callback | Connect OneDrive |
+| `GET /api/oauth/onedrive/start` · `GET /api/oauth/google/start` → callbacks | Connect a cloud backend |
 | `GET /f/:token` | Public file (CDN), supports Range |
 
 ## Testing
@@ -174,7 +199,7 @@ credentials needed.
 ```
 server/   Express API, storage engine, SQLite metadata
   src/
-    storage/   provider.ts (interface) · local.ts · onedrive.ts · registry.ts
+    storage/   provider.ts (interface) · local.ts · onedrive.ts · googledrive.ts · registry.ts
     services/  placement.ts · files.ts · quota.ts
     routes/    auth · files · admin · oauth · cdn
     models/    nodes.ts · backends.ts        db/  schema · migrate
