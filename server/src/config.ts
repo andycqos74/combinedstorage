@@ -65,6 +65,8 @@ export const config = {
     process.env.COOKIE_SECURE !== undefined
       ? process.env.COOKIE_SECURE.toLowerCase() === 'true'
       : process.env.NODE_ENV === 'production',
+  // When true, every uploaded file automatically gets a friendly alias derived from its name.
+  autoAliasOnUpload: (process.env.AUTO_ALIAS_ON_UPLOAD ?? '').toLowerCase() === 'true',
   microsoft:
     msClientId && msClientSecret
       ? ({

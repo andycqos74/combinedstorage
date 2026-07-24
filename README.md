@@ -40,7 +40,7 @@ Express server (TypeScript)
 ## Features
 
 - File manager: browse folders, **create folder, upload (drag-and-drop or picker), rename,
-  delete**, copy a file's public link.
+  delete**, copy a file's public link, and give files **friendly link aliases**.
 - Combined storage meter across all connected backends.
 - Admin page to **add local-disk backends** and **connect OneDrive / Google Drive**, enable/disable
   or remove them.
@@ -138,6 +138,7 @@ across restarts and redeploys (only removing the `combinedstorage-data` volume w
 | `ADMIN_USERNAME` / `ADMIN_PASSWORD` | Admin login | `admin` / `changeme` |
 | `SESSION_SECRET` | Signs the session cookie — set a long random value | _dev placeholder_ |
 | `COOKIE_SECURE` | Require HTTPS for the session cookie | on when `NODE_ENV=production` |
+| `AUTO_ALIAS_ON_UPLOAD` | Auto-generate a friendly alias for every upload | `false` |
 | `MS_CLIENT_ID` / `MS_CLIENT_SECRET` | Azure app credentials (OneDrive) | _empty (OneDrive off)_ |
 | `MS_TENANT` | `common` (personal + work/school) or a tenant id | `common` |
 | `MS_REDIRECT_URI` | OAuth callback URL | `http://localhost:4000/api/oauth/onedrive/callback` |
@@ -204,6 +205,15 @@ Every uploaded file gets an unguessable public URL: `GET {PUBLIC_BASE_URL}/f/<to
 no login, sends `Cache-Control` and `ETag`, and supports `Range` requests — so it can back
 `<img>`, `<video>`, downloads, etc. Use **Copy link** on any file in the UI.
 
+### Friendly links (aliases)
+
+Each file can also have a **friendly alias** that resolves at the same prefix, e.g.
+`{PUBLIC_BASE_URL}/f/annual-report.pdf`. In the file list, **Friendly link** suggests a unique slug
+from the filename (which you can edit) and saves it; **Edit link** changes or clears it afterwards.
+The random token URL keeps working as a permanent fallback, so changing an alias never breaks the
+token link. Aliases are globally unique; a suffix (`-2`, `-3`, …) is added if one is taken. Set
+`AUTO_ALIAS_ON_UPLOAD=true` to give every uploaded file an alias automatically.
+
 ## API overview
 
 Management endpoints require the admin session cookie; `/f/:token` is public.
@@ -216,6 +226,7 @@ Management endpoints require the admin session cookie; `/f/:token` is public.
 | `POST /api/files/:parentId/folders` | Create a folder |
 | `POST /api/files/:parentId/upload?name=…` | Upload (raw body = file bytes) |
 | `PATCH /api/files/:id/rename` · `PATCH /api/files/:id/move` · `DELETE /api/files/:id` | Modify |
+| `GET /api/files/:id/alias/suggest` · `PUT /api/files/:id/alias` · `DELETE /api/files/:id/alias` | Friendly link |
 | `GET /api/admin/backends` · `POST /api/admin/backends/local` | Manage backends |
 | `PATCH /api/admin/backends/:id` · `DELETE /api/admin/backends/:id` | Enable/disable, remove |
 | `GET /api/oauth/onedrive/start` · `GET /api/oauth/google/start` → callbacks | Connect a cloud backend |

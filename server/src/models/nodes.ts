@@ -17,6 +17,7 @@ export interface NodeRow {
   backend_id: string | null;
   object_key: string | null;
   public_token: string | null;
+  alias: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -29,6 +30,28 @@ export function getFileByToken(token: string): NodeRow | undefined {
   return db
     .prepare("SELECT * FROM nodes WHERE public_token = ? AND type = 'file'")
     .get(token) as NodeRow | undefined;
+}
+
+/** Resolve a public CDN handle to a file: matches either its permanent token or its alias. */
+export function getFileByHandle(handle: string): NodeRow | undefined {
+  return db
+    .prepare("SELECT * FROM nodes WHERE type = 'file' AND (public_token = ? OR alias = ?)")
+    .get(handle, handle) as NodeRow | undefined;
+}
+
+/** True if a handle is already taken by any file's token or alias (optionally excluding one node). */
+export function handleInUse(handle: string, exceptId?: string): boolean {
+  const row = db
+    .prepare(
+      `SELECT id FROM nodes
+       WHERE (public_token = ? OR alias = ?) AND id != ?`,
+    )
+    .get(handle, handle, exceptId ?? '') as { id: string } | undefined;
+  return !!row;
+}
+
+export function setNodeAlias(id: string, alias: string | null): void {
+  db.prepare('UPDATE nodes SET alias = ?, updated_at = ? WHERE id = ?').run(alias, nowIso(), id);
 }
 
 /** Children of a folder: folders first, then files, each case-insensitively sorted. */

@@ -21,6 +21,9 @@ export function toDto(node: NodeRow) {
       node.type === 'file' && node.public_token
         ? `${config.publicBaseUrl}/f/${node.public_token}`
         : null,
+    alias: node.alias,
+    aliasUrl:
+      node.type === 'file' && node.alias ? `${config.publicBaseUrl}/f/${node.alias}` : null,
     createdAt: node.created_at,
     updatedAt: node.updated_at,
   };
@@ -95,5 +98,33 @@ filesRouter.delete(
   asyncHandler(async (req, res) => {
     await files.remove(req.params.id);
     res.json({ ok: true });
+  }),
+);
+
+// ---- friendly aliases ----
+
+// Suggest a unique friendly alias for a file (does not persist it).
+filesRouter.get(
+  '/:id/alias/suggest',
+  asyncHandler(async (req, res) => {
+    res.json(files.suggestAlias(req.params.id));
+  }),
+);
+
+// Set or replace a file's friendly alias.
+filesRouter.put(
+  '/:id/alias',
+  json,
+  asyncHandler(async (req, res) => {
+    const node = files.setAlias(req.params.id, String(req.body?.alias ?? ''));
+    res.json(toDto(node));
+  }),
+);
+
+// Remove a file's friendly alias.
+filesRouter.delete(
+  '/:id/alias',
+  asyncHandler(async (req, res) => {
+    res.json(toDto(files.clearAlias(req.params.id)));
   }),
 );

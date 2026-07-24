@@ -29,6 +29,8 @@ services:
       # Testing over plain HTTP, so the session cookie must not require HTTPS.
       # Set to "true" when serving over HTTPS (e.g. behind a reverse proxy).
       COOKIE_SECURE: "${COOKIE_SECURE:-false}"
+      # Auto-generate a friendly link alias for every uploaded file.
+      AUTO_ALIAS_ON_UPLOAD: "${AUTO_ALIAS_ON_UPLOAD:-false}"
       # ---- OneDrive (optional): fill these in to enable "Connect OneDrive" ----
       MS_CLIENT_ID: "${MS_CLIENT_ID:-}"
       MS_CLIENT_SECRET: "${MS_CLIENT_SECRET:-}"

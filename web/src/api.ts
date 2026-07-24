@@ -10,6 +10,8 @@ export interface NodeDto {
   size: number | null;
   mimeType: string | null;
   url: string | null;
+  alias: string | null;
+  aliasUrl: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -107,6 +109,12 @@ export const api = {
     req<NodeDto>(`/api/files/${id}/move`, { method: 'PATCH', ...jsonBody({ parentId }) }),
   remove: (id: string) => req<{ ok: true }>(`/api/files/${id}`, { method: 'DELETE' }),
   upload,
+
+  suggestAlias: (id: string) =>
+    req<{ suggestion: string; currentAlias: string | null }>(`/api/files/${id}/alias/suggest`),
+  setAlias: (id: string, alias: string) =>
+    req<NodeDto>(`/api/files/${id}/alias`, { method: 'PUT', ...jsonBody({ alias }) }),
+  clearAlias: (id: string) => req<NodeDto>(`/api/files/${id}/alias`, { method: 'DELETE' }),
 
   meta: () =>
     req<{ oneDriveConfigured: boolean; googleDriveConfigured: boolean }>('/api/admin/meta'),

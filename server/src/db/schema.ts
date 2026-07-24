@@ -34,7 +34,8 @@ CREATE TABLE IF NOT EXISTS nodes (
   mime_type    TEXT,                                -- file only
   backend_id   TEXT REFERENCES backends(id),        -- file only: which backend holds the bytes
   object_key   TEXT,                                -- file only: key/id within that backend
-  public_token TEXT UNIQUE,                         -- file only: CDN handle
+  public_token TEXT UNIQUE,                         -- file only: permanent random CDN handle
+  alias        TEXT,                                -- file only: optional friendly CDN handle
   created_at   TEXT NOT NULL,
   updated_at   TEXT NOT NULL,
   UNIQUE (parent_id, name)
@@ -43,4 +44,6 @@ CREATE TABLE IF NOT EXISTS nodes (
 CREATE INDEX IF NOT EXISTS idx_nodes_parent  ON nodes(parent_id);
 CREATE INDEX IF NOT EXISTS idx_nodes_backend ON nodes(backend_id);
 CREATE INDEX IF NOT EXISTS idx_nodes_token   ON nodes(public_token);
+-- NOTE: the unique index on nodes(alias) is created in migrate() after ensuring the column
+-- exists, so upgrading an existing database (added via ALTER TABLE) works too.
 `;

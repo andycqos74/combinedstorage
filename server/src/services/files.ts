@@ -5,6 +5,9 @@ import {
   type NodeRow,
   getNode,
   getFileByToken,
+  getFileByHandle,
+  handleInUse,
+  setNodeAlias,
   listChildren,
   childByName,
   createFolderNode,
@@ -19,6 +22,7 @@ import { getBackend } from '../models/backends';
 import { providerFor } from '../storage/registry';
 import type { ByteRange, GetResult } from '../storage/provider';
 import { chooseBackend } from './placement';
+import { config } from '../config';
 import { BadRequestError, NotFoundError } from '../util/errors';
 
 // ---- helpers ---------------------------------------------------------------
@@ -41,9 +45,56 @@ function validateName(raw: string): string {
   return name;
 }
 
+// ---- friendly aliases ------------------------------------------------------
+
+/** Turn a filename (or user input) into a friendly URL slug, keeping a trailing extension. */
+function slugify(input: string): string {
+  return (input ?? '')
+    .normalize('NFKD')
+    .replace(/[̀-ͯ]/g, '') // strip accents
+    .toLowerCase()
+    .replace(/[^a-z0-9.]+/g, '-') // anything but alnum/dot -> hyphen
+    .replace(/-+/g, '-')
+    .replace(/\.+/g, '.')
+    .replace(/^[-.]+|[-.]+$/g, ''); // trim leading/trailing separators
+}
+
+/** Insert a numeric suffix before the extension: "report.pdf" + 2 -> "report-2.pdf". */
+function withSuffix(slug: string, n: number): string {
+  const dot = slug.lastIndexOf('.');
+  return dot > 0 ? `${slug.slice(0, dot)}-${n}${slug.slice(dot)}` : `${slug}-${n}`;
+}
+
+/** A unique friendly handle derived from `base`, appending -2, -3, … if needed. */
+function uniqueAlias(base: string, exceptId?: string): string {
+  const slug = slugify(base) || 'file';
+  if (!handleInUse(slug, exceptId)) return slug;
+  for (let n = 2; n < 10000; n++) {
+    const candidate = withSuffix(slug, n);
+    if (!handleInUse(candidate, exceptId)) return candidate;
+  }
+  return `${slug}-${Date.now()}`;
+}
+
+/** Normalize a user-supplied alias to a valid slug, or throw with a clear message. */
+function normalizeAlias(raw: string): string {
+  const slug = slugify(raw);
+  if (!slug) {
+    throw new BadRequestError('That link has no usable characters — use letters, numbers, dots or hyphens.');
+  }
+  if (slug.length > 128) throw new BadRequestError('Link is too long (max 128 characters).');
+  return slug;
+}
+
 function requireFolder(id: string, label = 'Folder'): NodeRow {
   const node = getNode(id);
   if (!node || node.type !== 'folder') throw new NotFoundError(`${label} not found.`);
+  return node;
+}
+
+function requireFile(id: string): NodeRow {
+  const node = getNode(id);
+  if (!node || node.type !== 'file') throw new NotFoundError('File not found.');
   return node;
 }
 
@@ -88,7 +139,8 @@ export function createFolder(parentId: string, rawName: string): NodeRow {
 /**
  * Stream an upload to the chosen backend, then record the file node. Placement runs on the
  * declared size (accurate Content-Length from the raw-body upload); the stored size is the
- * bytes the provider actually wrote.
+ * bytes the provider actually wrote. When AUTO_ALIAS_ON_UPLOAD is on, a friendly alias is
+ * generated from the name.
  */
 export async function uploadFile(input: {
   parentId: string;
@@ -110,7 +162,7 @@ export async function uploadFile(input: {
     contentType: mimeType,
   });
 
-  return createFileNode({
+  const node = createFileNode({
     parentId: input.parentId,
     name,
     path: joinPath(parent.path, name),
@@ -119,6 +171,12 @@ export async function uploadFile(input: {
     backendId: backend.id,
     objectKey,
   });
+
+  if (config.autoAliasOnUpload) {
+    setNodeAlias(node.id, uniqueAlias(node.name, node.id));
+    return getNode(node.id)!;
+  }
+  return node;
 }
 
 export function rename(id: string, rawName: string): NodeRow {
@@ -188,10 +246,40 @@ export async function remove(id: string): Promise<void> {
   deleteNodeRow(id);
 }
 
+// ---- friendly-alias operations ---------------------------------------------
+
+/** A unique alias suggestion for a file (does not persist it) plus its current alias. */
+export function suggestAlias(id: string): { suggestion: string; currentAlias: string | null } {
+  const node = requireFile(id);
+  return { suggestion: uniqueAlias(node.name, node.id), currentAlias: node.alias };
+}
+
+/** Set (or replace) a file's friendly alias. Throws if the normalized slug is already taken. */
+export function setAlias(id: string, rawAlias: string): NodeRow {
+  const node = requireFile(id);
+  const alias = normalizeAlias(rawAlias);
+  if (handleInUse(alias, node.id)) {
+    throw new BadRequestError('That friendly link is already in use — try another.');
+  }
+  setNodeAlias(id, alias);
+  return getNode(id)!;
+}
+
+export function clearAlias(id: string): NodeRow {
+  requireFile(id);
+  setNodeAlias(id, null);
+  return getNode(id)!;
+}
+
 // ---- serving (used by the CDN endpoint) ------------------------------------
 
 export function fileByToken(token: string): NodeRow | undefined {
   return getFileByToken(token);
+}
+
+/** Resolve a public handle (permanent token or friendly alias) to a file. */
+export function fileByHandle(handle: string): NodeRow | undefined {
+  return getFileByHandle(handle);
 }
 
 export async function openFile(node: NodeRow, range?: ByteRange): Promise<GetResult> {

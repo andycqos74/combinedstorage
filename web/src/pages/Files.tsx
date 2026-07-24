@@ -95,14 +95,42 @@ export function Files() {
   }
 
   async function copyLink(node: NodeDto) {
-    if (!node.url) return;
+    const link = node.aliasUrl ?? node.url;
+    if (!link) return;
     try {
-      await navigator.clipboard.writeText(node.url);
+      await navigator.clipboard.writeText(link);
     } catch {
-      window.prompt('Copy this link:', node.url);
+      window.prompt('Copy this link:', link);
     }
     setCopied(node.id);
     setTimeout(() => setCopied(''), 1200);
+  }
+
+  // Set, edit, or clear a file's friendly link. Prefills a unique suggestion from the server.
+  async function editAlias(node: NodeDto) {
+    let prefill = node.alias ?? '';
+    if (!prefill) {
+      try {
+        prefill = (await api.suggestAlias(node.id)).suggestion;
+      } catch {
+        /* fall back to empty */
+      }
+    }
+    const input = window.prompt(
+      `Friendly link for "${node.name}".\nEdit the path, or clear it to remove the friendly link:`,
+      prefill,
+    );
+    if (input === null) return; // cancelled
+    try {
+      if (input.trim() === '') {
+        if (node.alias) await api.clearAlias(node.id);
+      } else {
+        await api.setAlias(node.id, input.trim());
+      }
+      await load();
+    } catch (err) {
+      alert(errorMessage(err));
+    }
   }
 
   const children = data?.children ?? [];
@@ -184,24 +212,41 @@ export function Files() {
                 <tr key={node.id}>
                   <td className="cell-name">
                     <span className="icon">{node.type === 'folder' ? '📁' : '📄'}</span>
-                    {node.type === 'folder' ? (
-                      <button className="link name-btn" onClick={() => setFolderId(node.id)}>
-                        {node.name}
-                      </button>
-                    ) : (
-                      <a href={node.url ?? '#'} target="_blank" rel="noreferrer" className="name-btn">
-                        {node.name}
-                      </a>
-                    )}
+                    <div className="name-wrap">
+                      {node.type === 'folder' ? (
+                        <button className="link name-btn" onClick={() => setFolderId(node.id)}>
+                          {node.name}
+                        </button>
+                      ) : (
+                        <a
+                          href={node.aliasUrl ?? node.url ?? '#'}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="name-btn"
+                        >
+                          {node.name}
+                        </a>
+                      )}
+                      {node.type === 'file' && node.alias && (
+                        <span className="alias-line" title={node.aliasUrl ?? ''}>
+                          🔗 /f/{node.alias}
+                        </span>
+                      )}
+                    </div>
                   </td>
                   <td className="col-size muted">
                     {node.type === 'file' ? formatBytes(node.size) : '—'}
                   </td>
                   <td className="col-actions">
                     {node.type === 'file' && (
-                      <button className="link" onClick={() => copyLink(node)}>
-                        {copied === node.id ? 'Copied!' : 'Copy link'}
-                      </button>
+                      <>
+                        <button className="link" onClick={() => copyLink(node)}>
+                          {copied === node.id ? 'Copied!' : 'Copy link'}
+                        </button>
+                        <button className="link" onClick={() => editAlias(node)}>
+                          {node.alias ? 'Edit link' : 'Friendly link'}
+                        </button>
+                      </>
                     )}
                     <button className="link" onClick={() => rename(node)}>
                       Rename

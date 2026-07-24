@@ -30,7 +30,8 @@ function parseRange(header: string | undefined, size: number): ByteRange | null 
 }
 
 const serve = asyncHandler(async (req, res) => {
-  const node = files.fileByToken(req.params.token);
+  // The handle can be a file's permanent token or its friendly alias.
+  const node = files.fileByHandle(req.params.token);
   if (!node) {
     res.status(404).send('Not found');
     return;
