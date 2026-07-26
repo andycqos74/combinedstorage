@@ -1,0 +1,13 @@
+# Combined Storage rclone remote (WebDAV). Copy into your rclone.conf
+# (run `rclone config file` to find its path), or use mount-combinedstorage.ps1 which writes it for you.
+#
+# The password must be rclone-obscured, NOT plaintext. Generate it with:
+#     rclone obscure "YOUR_PASSWORD"
+# and paste the result as `pass` below.
+
+[combinedstorage]
+type = webdav
+url = https://file.amcmail.co.uk/dav
+vendor = other
+user = admin
+pass =

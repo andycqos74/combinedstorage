@@ -24,6 +24,9 @@ fs.mkdirSync(dataDir, { recursive: true });
 // Public CDN links and, by default, the OAuth callback URLs are built from this.
 const publicBaseUrl = (process.env.PUBLIC_BASE_URL || `http://localhost:${port}`).replace(/\/+$/, '');
 
+const adminUsername = process.env.ADMIN_USERNAME || 'admin';
+const adminPassword = process.env.ADMIN_PASSWORD || 'changeme';
+
 const msClientId = process.env.MS_CLIENT_ID?.trim();
 const msClientSecret = process.env.MS_CLIENT_SECRET?.trim();
 const googleClientId = process.env.GOOGLE_CLIENT_ID?.trim();
@@ -54,8 +57,14 @@ export const config = {
   /** Directory containing the built web SPA (served in production). */
   webDist: path.resolve(serverDir, '..', 'web', 'dist'),
   admin: {
-    username: process.env.ADMIN_USERNAME || 'admin',
-    password: process.env.ADMIN_PASSWORD || 'changeme',
+    username: adminUsername,
+    password: adminPassword,
+  },
+  // WebDAV drive endpoint (/dav). Enabled by default; credentials default to the admin login.
+  dav: {
+    enabled: (process.env.DAV_ENABLED ?? 'true').toLowerCase() !== 'false',
+    username: process.env.DAV_USERNAME || adminUsername,
+    password: process.env.DAV_PASSWORD || adminPassword,
   },
   sessionSecret: process.env.SESSION_SECRET || 'dev-insecure-session-secret-change-me',
   isProd: process.env.NODE_ENV === 'production',

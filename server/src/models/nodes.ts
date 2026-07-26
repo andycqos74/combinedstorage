@@ -111,6 +111,19 @@ export function createFileNode(input: {
   return getNode(id)!;
 }
 
+/** Repoint a file node at freshly-stored bytes (used when a WebDAV PUT overwrites content). */
+export function updateFileBlob(input: {
+  id: string;
+  backendId: string;
+  objectKey: string;
+  size: number;
+  mimeType: string;
+}): void {
+  db.prepare(
+    'UPDATE nodes SET backend_id = ?, object_key = ?, size = ?, mime_type = ?, updated_at = ? WHERE id = ?',
+  ).run(input.backendId, input.objectKey, input.size, input.mimeType, nowIso(), input.id);
+}
+
 export function updateNodeNameAndPath(id: string, name: string, path: string): void {
   db.prepare('UPDATE nodes SET name = ?, path = ?, updated_at = ? WHERE id = ?').run(
     name,

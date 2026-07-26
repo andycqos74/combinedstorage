@@ -46,6 +46,7 @@ Express server (TypeScript)
   or remove them.
 - Automatic upload placement (most-free-space first) with a clear "insufficient space" error.
 - Public, cacheable file URLs with HTTP **Range** support (media seeking) and ETag/`304`.
+- **Mount as a Windows drive** (WebDAV endpoint at `/dav`) via rclone + WinFsp.
 
 ## Tech stack
 
@@ -139,6 +140,8 @@ across restarts and redeploys (only removing the `combinedstorage-data` volume w
 | `SESSION_SECRET` | Signs the session cookie — set a long random value | _dev placeholder_ |
 | `COOKIE_SECURE` | Require HTTPS for the session cookie | on when `NODE_ENV=production` |
 | `AUTO_ALIAS_ON_UPLOAD` | Auto-generate a friendly alias for every upload | `false` |
+| `DAV_ENABLED` | Serve the WebDAV drive at `/dav` | `true` |
+| `DAV_USERNAME` / `DAV_PASSWORD` | Drive Basic-auth credentials | admin login |
 | `MS_CLIENT_ID` / `MS_CLIENT_SECRET` | Azure app credentials (OneDrive) | _empty (OneDrive off)_ |
 | `MS_TENANT` | `common` (personal + work/school) or a tenant id | `common` |
 | `MS_REDIRECT_URI` | OAuth callback URL | `http://localhost:4000/api/oauth/onedrive/callback` |
@@ -214,6 +217,31 @@ The random token URL keeps working as a permanent fallback, so changing an alias
 token link. Aliases are globally unique; a suffix (`-2`, `-3`, …) is added if one is taken. Set
 `AUTO_ALIAS_ON_UPLOAD=true` to give every uploaded file an alias automatically.
 
+## Mount as a Windows drive (WebDAV)
+
+The server exposes a **WebDAV endpoint at `/dav`** so the same unified storage can be mounted as a
+Windows drive letter — browse and edit files in File Explorer, backed by the combined backends.
+
+Recommended client is **rclone + WinFsp** (a real drive with on-demand caching, like OneDrive's Files
+On-Demand). See [`clients/windows/`](clients/windows/README.md):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\clients\windows\mount-combinedstorage.ps1 -Install -AtLogon
+```
+
+Details:
+
+- The `/dav` endpoint uses **HTTP Basic auth** (separate from the web session). Credentials default to
+  the admin login, or set `DAV_USERNAME` / `DAV_PASSWORD` for dedicated drive credentials; disable the
+  endpoint with `DAV_ENABLED=false`.
+- Editing a file from the drive **preserves its `/f/<token>` CDN link and friendly alias** (a PUT
+  overwrite keeps the same file identity).
+- Windows' built-in *Map network drive* to `https://…/dav` also works, but rclone+WinFsp is faster and
+  avoids the built-in client's 50 MB limit.
+- **Behind Cloudflare:** ensure the tunnel passes WebDAV methods (PROPFIND, MKCOL, MOVE, COPY, LOCK);
+  and note Cloudflare's proxied request-body cap (~100 MB Free/Pro) limits large-file uploads through
+  the tunnel.
+
 ## API overview
 
 Management endpoints require the admin session cookie; `/f/:token` is public.
@@ -231,6 +259,7 @@ Management endpoints require the admin session cookie; `/f/:token` is public.
 | `PATCH /api/admin/backends/:id` · `DELETE /api/admin/backends/:id` | Enable/disable, remove |
 | `GET /api/oauth/onedrive/start` · `GET /api/oauth/google/start` → callbacks | Connect a cloud backend |
 | `GET /f/:token` | Public file (CDN), supports Range |
+| `PROPFIND/GET/PUT/MKCOL/DELETE/MOVE/COPY … /dav/*` | WebDAV drive (own Basic auth) |
 
 ## Testing
 
@@ -246,12 +275,14 @@ credentials needed.
 ```
 server/   Express API, storage engine, SQLite metadata
   src/
+    app.ts     builds the Express app     index.ts  starts it
     storage/   provider.ts (interface) · local.ts · onedrive.ts · googledrive.ts · registry.ts
-    services/  placement.ts · files.ts · quota.ts
-    routes/    auth · files · admin · oauth · cdn
+    services/  placement.ts · files.ts · quota.ts · webdav.ts
+    routes/    auth · files · admin · oauth · cdn · webdav
     models/    nodes.ts · backends.ts        db/  schema · migrate
   test/      Vitest suites
 web/      React + Vite front end (Login / Files / Admin)
+clients/windows/   rclone + WinFsp mount script for the Windows drive
 ```
 
 ## Adding another storage backend

@@ -12,6 +12,7 @@ import {
   childByName,
   createFolderNode,
   createFileNode,
+  updateFileBlob,
   updateNodeNameAndPath,
   updateNodeParentAndPath,
   updateNodePath,
@@ -244,6 +245,140 @@ export async function remove(id: string): Promise<void> {
     }
   }
   deleteNodeRow(id);
+}
+
+/**
+ * Create or overwrite a file at a given folder+name (WebDAV PUT semantics). On overwrite the
+ * node keeps its id, public_token, and alias — so existing CDN/friendly links survive an
+ * in-place edit — while its bytes are repointed to a freshly-stored object and the old object
+ * is removed.
+ */
+export async function writeFileAtPath(input: {
+  parentId: string;
+  name: string;
+  stream: Readable;
+  size: number;
+  mimeType?: string;
+}): Promise<NodeRow> {
+  const parent = requireFolder(input.parentId, 'Parent folder');
+  const name = validateName(input.name);
+  const existing = childByName(input.parentId, name);
+  if (existing && existing.type === 'folder') {
+    throw new BadRequestError('A folder with that name already exists here.');
+  }
+
+  const mimeType = input.mimeType || mimeLookup(name) || 'application/octet-stream';
+  const backend = await chooseBackend(input.size);
+  const { objectKey, size } = await providerFor(backend).put(input.stream, {
+    size: input.size,
+    contentType: mimeType,
+  });
+
+  if (existing) {
+    const oldBackendId = existing.backend_id;
+    const oldObjectKey = existing.object_key;
+    updateFileBlob({ id: existing.id, backendId: backend.id, objectKey, size, mimeType });
+    const isSameObject = oldBackendId === backend.id && oldObjectKey === objectKey;
+    if (oldBackendId && oldObjectKey && !isSameObject) {
+      const oldBackend = getBackend(oldBackendId);
+      if (oldBackend) {
+        try {
+          await providerFor(oldBackend).delete(oldObjectKey);
+        } catch {
+          // a stray old blob is harmless; the DB is the source of truth
+        }
+      }
+    }
+    return getNode(existing.id)!;
+  }
+
+  const node = createFileNode({
+    parentId: input.parentId,
+    name,
+    path: joinPath(parent.path, name),
+    size,
+    mimeType,
+    backendId: backend.id,
+    objectKey,
+  });
+  if (config.autoAliasOnUpload) {
+    setNodeAlias(node.id, uniqueAlias(node.name, node.id));
+    return getNode(node.id)!;
+  }
+  return node;
+}
+
+/** Copy a file or a whole folder subtree to a destination folder (WebDAV COPY). */
+export async function copyNode(
+  id: string,
+  destParentId: string,
+  destName: string,
+  overwrite: boolean,
+): Promise<NodeRow> {
+  const node = getNode(id);
+  if (!node) throw new NotFoundError('Item not found.');
+  const destParent = requireFolder(destParentId, 'Destination folder');
+  const name = validateName(destName);
+
+  const clash = childByName(destParentId, name);
+  if (clash) {
+    if (!overwrite) throw new BadRequestError('An item with that name already exists in the destination.');
+    await remove(clash.id);
+  }
+
+  if (node.type === 'folder') {
+    if (new Set(collectSubtree(id).map((n) => n.id)).has(destParentId)) {
+      throw new BadRequestError('A folder cannot be copied into itself or one of its subfolders.');
+    }
+    const newFolder = createFolderNode(destParentId, name, joinPath(destParent.path, name));
+    for (const child of listChildren(id)) {
+      await copyNode(child.id, newFolder.id, child.name, false);
+    }
+    return getNode(newFolder.id)!;
+  }
+
+  if (!node.backend_id || !node.object_key) throw new BadRequestError('File has no content to copy.');
+  const src = await openFile(node);
+  const backend = await chooseBackend(node.size ?? 0);
+  const { objectKey, size } = await providerFor(backend).put(src.stream, {
+    size: node.size ?? 0,
+    contentType: node.mime_type ?? undefined,
+  });
+  return createFileNode({
+    parentId: destParentId,
+    name,
+    path: joinPath(destParent.path, name),
+    size,
+    mimeType: node.mime_type ?? 'application/octet-stream',
+    backendId: backend.id,
+    objectKey,
+  });
+}
+
+/**
+ * Move a node to a new parent and/or name in one validated step (WebDAV MOVE). Validates only
+ * the final destination, avoiding the transient name clashes a separate move+rename could hit.
+ */
+export function relocate(id: string, newParentId: string, newName: string): NodeRow {
+  const node = getNode(id);
+  if (!node) throw new NotFoundError('Item not found.');
+  if (node.id === ROOT_ID) throw new BadRequestError('The root folder cannot be moved.');
+  const dest = requireFolder(newParentId, 'Destination folder');
+  const name = validateName(newName);
+
+  if (node.type === 'folder' && new Set(collectSubtree(id).map((n) => n.id)).has(newParentId)) {
+    throw new BadRequestError('A folder cannot be moved into itself or one of its subfolders.');
+  }
+  const clash = childByName(newParentId, name);
+  if (clash && clash.id !== id) {
+    throw new BadRequestError('An item with that name already exists in the destination.');
+  }
+
+  const newPath = joinPath(dest.path, name);
+  updateNodeParentAndPath(id, newParentId, newPath);
+  if (name !== node.name) updateNodeNameAndPath(id, name, newPath);
+  if (node.type === 'folder') repathDescendants(id, newPath);
+  return getNode(id)!;
 }
 
 // ---- friendly-alias operations ---------------------------------------------
