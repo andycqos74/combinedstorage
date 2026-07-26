@@ -22,6 +22,16 @@ hidden Scheduled Task instead, which is more robust. Either way the drive mounts
 `%LOCALAPPDATA%\CombinedStorage\rclone-mount.log`. To watch errors live instead, run the script
 without `-AtLogon` so the mount stays in the foreground.
 
+**Don't mount from an elevated PowerShell.** Windows gives elevated and normal processes separate
+drive-letter namespaces, so a drive mounted by an "Run as administrator" shell is visible in that
+shell but **not in File Explorer**. Run the script (or `rclone mount`) from an ordinary PowerShell
+window. To share drive letters between both contexts instead, set this once and reboot:
+
+```powershell
+New-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" `
+  -Name EnableLinkedConnections -PropertyType DWord -Value 1 -Force
+```
+
 Options:
 
 ```powershell
