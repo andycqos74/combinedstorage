@@ -13,6 +13,8 @@ import { filesRouter } from './routes/files';
 import { adminRouter } from './routes/admin';
 import { cdnRouter } from './routes/cdn';
 import { webdavRouter } from './routes/webdav';
+import { webdavChunksRouter } from './routes/webdavChunks';
+import { sweepStaleSessions } from './services/chunks';
 import { aggregateQuota } from './services/quota';
 
 migrate();
@@ -41,6 +43,17 @@ app.get('/api/health', (_req, res) => res.json({ ok: true }));
 // --- WebDAV drive (own Basic auth; not the cookie session) ---
 if (config.dav.enabled) {
   app.use('/dav', webdavRouter);
+  // Nextcloud-shaped aliases. rclone only enables chunked uploads for vendor=nextcloud, and it
+  // derives the chunk endpoint from an endpoint URL matching /dav/files/<user>. Serving these
+  // paths lets rclone split large files into small requests (see routes/webdavChunks.ts).
+  app.use('/remote.php/dav/files/:user', webdavRouter);
+  app.use('/remote.php/dav/uploads/:user', webdavChunksRouter);
+
+  // Reclaim staging space from uploads that were aborted before finalizing.
+  void sweepStaleSessions().then((n) => {
+    // eslint-disable-next-line no-console
+    if (n > 0) console.log(`Cleaned up ${n} stale chunked-upload session(s).`);
+  });
 }
 
 // --- Public (no auth): CDN file serving + OAuth callback + login ---
@@ -67,7 +80,8 @@ if (fs.existsSync(config.webDist)) {
     if (
       req.path.startsWith('/api') ||
       req.path.startsWith('/f/') ||
-      req.path.startsWith('/dav')
+      req.path.startsWith('/dav') ||
+      req.path.startsWith('/remote.php')
     ) {
       next();
       return;

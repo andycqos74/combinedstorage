@@ -4,8 +4,12 @@
 
 .DESCRIPTION
   Installs WinFsp + rclone (optional), creates an rclone WebDAV remote for the Combined Storage
-  /dav endpoint, and mounts it as a drive letter with on-demand VFS caching (files download on
-  open and are cached locally, similar to OneDrive Files On-Demand).
+  server, and mounts it as a drive letter with on-demand VFS caching (files download on open and
+  are cached locally, similar to OneDrive Files On-Demand).
+
+  The remote is configured with vendor=nextcloud so rclone uploads large files in chunks. That
+  keeps every HTTP request small, so files of any size upload cleanly through proxies that cap
+  request bodies (e.g. Cloudflare's ~100 MB limit).
 
 .EXAMPLE
   # First time (installs tools, prompts for password, mounts Z:)
@@ -16,11 +20,14 @@
   .\mount-combinedstorage.ps1 -AtLogon
 #>
 param(
-  [string]$Url = "https://file.amcmail.co.uk/dav",
+  [string]$BaseUrl = "https://file.amcmail.co.uk",
   [string]$User = "admin",
   [string]$Password,
   [string]$DriveLetter = "Z",
   [string]$RemoteName = "combinedstorage",
+  # Upload chunk size. Must stay below any proxy request-body limit in front of the server
+  # (Cloudflare Free/Pro = 100M, Business = 200M).
+  [string]$ChunkSize = "50M",
   [switch]$Install,   # install WinFsp + rclone via winget first
   [switch]$AtLogon    # register a Scheduled Task to auto-mount at logon
 )
@@ -48,14 +55,24 @@ if (-not $Password) {
     [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure))
 }
 
-Write-Host "Creating rclone remote '$RemoteName' -> $Url" -ForegroundColor Cyan
+# rclone only enables chunked uploads for vendor=nextcloud, and it derives the chunk endpoint
+# from an endpoint URL of the form <prefix>/dav/files/<user>. The server serves that shape.
+$davUrl = "$($BaseUrl.TrimEnd('/'))/remote.php/dav/files/$User"
+
+Write-Host "Creating rclone remote '$RemoteName' -> $davUrl" -ForegroundColor Cyan
 # --obscure stores the password in rclone's obscured form (not plaintext).
-rclone config create $RemoteName webdav url="$Url" vendor=other user="$User" pass="$Password" --obscure | Out-Null
+rclone config create $RemoteName webdav `
+  url="$davUrl" `
+  vendor=nextcloud `
+  user="$User" `
+  pass="$Password" `
+  nextcloud_chunk_size="$ChunkSize" `
+  --obscure | Out-Null
 
 # Quick connectivity check.
 Write-Host "Checking connection..." -ForegroundColor Cyan
 rclone lsd "${RemoteName}:" | Out-Null
-Write-Host "Connected." -ForegroundColor Green
+Write-Host "Connected (uploads chunked at $ChunkSize)." -ForegroundColor Green
 
 $mountArgs = @(
   "mount", "${RemoteName}:", "${DriveLetter}:",

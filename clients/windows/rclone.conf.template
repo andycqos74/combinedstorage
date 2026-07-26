@@ -4,10 +4,18 @@
 # The password must be rclone-obscured, NOT plaintext. Generate it with:
 #     rclone obscure "YOUR_PASSWORD"
 # and paste the result as `pass` below.
+#
+# vendor = nextcloud enables chunked uploads, so large files are sent as many small requests
+# instead of one big one. Keep nextcloud_chunk_size below any proxy request-body limit in front
+# of the server (Cloudflare Free/Pro = 100M, Business = 200M). Set it to 0 to disable chunking.
+#
+# The url must keep the /remote.php/dav/files/<user> shape — rclone derives the chunk upload
+# endpoint from it.
 
 [combinedstorage]
 type = webdav
-url = https://file.amcmail.co.uk/dav
-vendor = other
+url = https://file.amcmail.co.uk/remote.php/dav/files/admin
+vendor = nextcloud
 user = admin
 pass =
+nextcloud_chunk_size = 50M

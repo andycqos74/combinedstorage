@@ -54,6 +54,8 @@ export const config = {
   dbPath: path.join(dataDir, 'combined.db'),
   /** Base directory under which local backends store their blobs (one subdir per backend). */
   localRoot: path.join(dataDir, 'local'),
+  /** Staging area for in-progress chunked WebDAV uploads (one subdir per upload session). */
+  chunkRoot: path.join(dataDir, 'chunks'),
   /** Directory containing the built web SPA (served in production). */
   webDist: path.resolve(serverDir, '..', 'web', 'dist'),
   admin: {

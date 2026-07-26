@@ -17,8 +17,25 @@ the rclone remote, and mounts drive `Z:`. Add `-AtLogon` to also auto-mount at e
 Options:
 
 ```powershell
-.\mount-combinedstorage.ps1 -Url https://file.amcmail.co.uk/dav -User admin -DriveLetter Z -AtLogon
+.\mount-combinedstorage.ps1 -BaseUrl https://file.amcmail.co.uk -User admin -DriveLetter Z -ChunkSize 50M -AtLogon
 ```
+
+## Large files (and why chunking matters)
+
+Uploads are **chunked**: rclone splits a big file into many small requests rather than one large
+one. That matters when the server sits behind a proxy that caps request bodies — **Cloudflare
+limits proxied uploads to ~100 MB** (Free/Pro; 200 MB on Business). With chunking, only the *chunk*
+has to fit under that limit, so files of any size upload fine through the tunnel.
+
+This is why the remote is configured with `vendor = nextcloud` (rclone only enables chunked uploads
+for that vendor) and a `url` ending in `/remote.php/dav/files/<user>` (rclone derives the chunk
+endpoint from that shape). The server implements the matching protocol.
+
+- Tune with `-ChunkSize` (default `50M`). Keep it **below** your proxy's limit; larger chunks mean
+  fewer requests and better throughput.
+- Set `nextcloud_chunk_size = 0` in the remote to disable chunking (then the ~100 MB cap applies).
+- The server stages chunks on disk while a large upload is in flight, so the server's `/data`
+  volume needs transient free space roughly equal to the file being uploaded.
 
 ## Manual setup (equivalent to the script)
 
@@ -27,9 +44,11 @@ Options:
    winget install --id WinFsp.WinFsp -e
    winget install --id Rclone.Rclone -e
    ```
-2. **Create the remote** (obscures the password):
+2. **Create the remote** (obscures the password, enables chunked uploads):
    ```powershell
-   rclone config create combinedstorage webdav url=https://file.amcmail.co.uk/dav vendor=other user=admin pass="YOUR_PASSWORD" --obscure
+   rclone config create combinedstorage webdav `
+     url=https://file.amcmail.co.uk/remote.php/dav/files/admin `
+     vendor=nextcloud user=admin pass="YOUR_PASSWORD" nextcloud_chunk_size=50M --obscure
    ```
    (Or copy `rclone.conf.template` into your `rclone.conf` and set an obscured `pass` from
    `rclone obscure "YOUR_PASSWORD"`.)
@@ -47,10 +66,10 @@ Options:
   this at `https://file.amcmail.co.uk`.
 - **Credentials**: the drive uses the Combined Storage login (or the dedicated `DAV_USERNAME` /
   `DAV_PASSWORD` if you set them on the server).
-- **Large files / Cloudflare**: uploads pass through Cloudflare, which caps proxied request bodies
-  (~100 MB on Free/Pro plans). Files larger than that will fail to upload through the tunnel — use a
-  higher Cloudflare plan or a direct/LAN path for very large files.
 - **Edited files keep their links**: overwriting a file from the drive preserves its `/f/<token>`
   CDN link and any friendly alias.
-- Built-in Windows "Map network drive" to `https://file.amcmail.co.uk/dav` also works, but rclone +
-  WinFsp is faster and far more reliable (no 50 MB limit, better caching).
+- **Cloudflare**: make sure the tunnel passes WebDAV methods (PROPFIND, MKCOL, MOVE, COPY, LOCK).
+  For the fastest transfers on a local network you can skip Cloudflare entirely and point
+  `-BaseUrl` at the server's LAN address.
+- The plain `/dav` endpoint still works for other WebDAV clients (including Windows' built-in *Map
+  network drive*), but it does **not** chunk — rclone with `vendor=nextcloud` is the recommended path.

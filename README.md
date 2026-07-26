@@ -231,16 +231,20 @@ powershell -ExecutionPolicy Bypass -File .\clients\windows\mount-combinedstorage
 
 Details:
 
-- The `/dav` endpoint uses **HTTP Basic auth** (separate from the web session). Credentials default to
-  the admin login, or set `DAV_USERNAME` / `DAV_PASSWORD` for dedicated drive credentials; disable the
-  endpoint with `DAV_ENABLED=false`.
+- The endpoint uses **HTTP Basic auth** (separate from the web session). Credentials default to the
+  admin login, or set `DAV_USERNAME` / `DAV_PASSWORD` for dedicated drive credentials; disable it
+  with `DAV_ENABLED=false`.
 - Editing a file from the drive **preserves its `/f/<token>` CDN link and friendly alias** (a PUT
   overwrite keeps the same file identity).
-- Windows' built-in *Map network drive* to `https://…/dav` also works, but rclone+WinFsp is faster and
-  avoids the built-in client's 50 MB limit.
-- **Behind Cloudflare:** ensure the tunnel passes WebDAV methods (PROPFIND, MKCOL, MOVE, COPY, LOCK);
-  and note Cloudflare's proxied request-body cap (~100 MB Free/Pro) limits large-file uploads through
-  the tunnel.
+- **Large files are chunked.** The server also implements the Nextcloud chunked-upload protocol at
+  `/remote.php/dav/{files,uploads}/<user>`, which rclone uses when the remote is configured with
+  `vendor = nextcloud`. Each chunk is a separate small request, so uploads are not limited by
+  proxy request-body caps — notably **Cloudflare's ~100 MB limit** (Free/Pro; 200 MB Business).
+  Chunks are staged under `DATA_DIR/chunks` and assembled on completion, so the data volume needs
+  transient free space roughly equal to the file being uploaded.
+- Windows' built-in *Map network drive* to `https://…/dav` also works, but rclone+WinFsp is faster,
+  avoids the built-in client's 50 MB limit, and is the only path that chunks large uploads.
+- **Behind Cloudflare:** ensure the tunnel passes WebDAV methods (PROPFIND, MKCOL, MOVE, COPY, LOCK).
 
 ## API overview
 
@@ -260,6 +264,7 @@ Management endpoints require the admin session cookie; `/f/:token` is public.
 | `GET /api/oauth/onedrive/start` · `GET /api/oauth/google/start` → callbacks | Connect a cloud backend |
 | `GET /f/:token` | Public file (CDN), supports Range |
 | `PROPFIND/GET/PUT/MKCOL/DELETE/MOVE/COPY … /dav/*` | WebDAV drive (own Basic auth) |
+| `… /remote.php/dav/files/:user/*` · `/remote.php/dav/uploads/:user/*` | Same drive, Nextcloud-shaped, with chunked uploads |
 
 ## Testing
 

@@ -1,6 +1,5 @@
-import { Router, type Request, type Response, type NextFunction } from 'express';
-import { config } from '../config';
-import { safeEqual } from '../util/auth';
+import { Router, type Request, type Response } from 'express';
+import { davBasicAuth } from '../middleware/davAuth';
 import { asyncHandler } from '../util/asyncHandler';
 import { parseRange } from '../util/range';
 import * as files from '../services/files';
@@ -11,24 +10,6 @@ import { lockStore } from '../webdav/locks';
 export const webdavRouter = Router();
 
 const ALLOW = 'OPTIONS, GET, HEAD, PROPFIND, PUT, DELETE, MKCOL, MOVE, COPY, PROPPATCH, LOCK, UNLOCK';
-
-// ---- HTTP Basic auth (WebDAV clients authenticate per request, not via the cookie) ----
-function basicAuth(req: Request, res: Response, next: NextFunction): void {
-  const header = req.headers.authorization ?? '';
-  const [scheme, encoded] = header.split(' ');
-  if (scheme === 'Basic' && encoded) {
-    const decoded = Buffer.from(encoded, 'base64').toString('utf8');
-    const sep = decoded.indexOf(':');
-    const user = sep >= 0 ? decoded.slice(0, sep) : decoded;
-    const pass = sep >= 0 ? decoded.slice(sep + 1) : '';
-    if (safeEqual(user, config.dav.username) && safeEqual(pass, config.dav.password)) {
-      next();
-      return;
-    }
-  }
-  res.setHeader('WWW-Authenticate', 'Basic realm="Combined Storage", charset="UTF-8"');
-  res.status(401).send('Authentication required.');
-}
 
 // ---- helpers ---------------------------------------------------------------
 
@@ -245,7 +226,7 @@ function handleUnlock(_req: Request, res: Response): void {
 }
 
 // ---- wiring: auth, then dispatch by method ----
-webdavRouter.use(basicAuth);
+webdavRouter.use(davBasicAuth);
 webdavRouter.use(
   asyncHandler(async (req: Request, res: Response) => {
     switch (req.method) {
