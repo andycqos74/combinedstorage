@@ -3,6 +3,9 @@ import { config } from '../config';
 import { asyncHandler } from '../util/asyncHandler';
 import { ROOT_ID, type NodeRow } from '../models/nodes';
 import * as files from '../services/files';
+import * as chunks from '../services/chunks';
+import { newId } from '../util/ids';
+import { BadRequestError } from '../util/errors';
 
 export const filesRouter = Router();
 const json = express.json();
@@ -69,6 +72,66 @@ filesRouter.post(
       mimeType: typeof contentType === 'string' ? contentType : undefined,
     });
     res.status(201).json(toDto(node));
+  }),
+);
+
+// ---- chunked upload (large files) ----
+// The browser splits a big file into chunks and sends each as its own request, so no single
+// request exceeds a proxy's body cap (e.g. Cloudflare's ~100 MB). Chunks are staged on disk and
+// assembled on completion, at which point the engine sees the true total size for placement.
+
+// Open an upload session; returns the id to send chunks against and the chunk size to use.
+filesRouter.post(
+  '/:parentId/upload-init',
+  asyncHandler(async (req, res) => {
+    files.listFolder(req.params.parentId); // 404s if the parent folder is missing
+    const uploadId = newId();
+    await chunks.createSession(uploadId);
+    res.status(201).json({ uploadId, chunkSize: config.uploadChunkSize });
+  }),
+);
+
+// Store one chunk at a byte offset (raw request body).
+filesRouter.put(
+  '/upload-chunk/:uploadId',
+  asyncHandler(async (req, res) => {
+    const offset = Number(req.query.offset ?? 0);
+    if (!Number.isFinite(offset) || offset < 0) throw new BadRequestError('Invalid chunk offset.');
+    // Name chunks by zero-padded offset so they assemble in ascending order.
+    await chunks.writeChunk(req.params.uploadId, String(offset).padStart(15, '0'), req);
+    res.status(204).end();
+  }),
+);
+
+// Assemble the staged chunks into a real file, then clear the staging area.
+filesRouter.post(
+  '/:parentId/upload-complete/:uploadId',
+  json,
+  asyncHandler(async (req, res) => {
+    const { parentId, uploadId } = req.params;
+    try {
+      const { paths, totalSize } = await chunks.sessionParts(uploadId);
+      if (paths.length === 0) throw new BadRequestError('No chunks were uploaded.');
+      const node = await files.uploadFile({
+        parentId,
+        name: String(req.body?.name ?? ''),
+        stream: chunks.concatStream(paths),
+        size: totalSize,
+        mimeType: req.body?.mimeType || undefined,
+      });
+      res.status(201).json(toDto(node));
+    } finally {
+      await chunks.destroySession(uploadId);
+    }
+  }),
+);
+
+// Abandon an upload session (e.g. the user cancelled).
+filesRouter.delete(
+  '/upload-chunk/:uploadId',
+  asyncHandler(async (req, res) => {
+    await chunks.destroySession(req.params.uploadId);
+    res.status(204).end();
   }),
 );
 

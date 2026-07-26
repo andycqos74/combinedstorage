@@ -65,32 +65,94 @@ function jsonBody(data: unknown): RequestInit {
   return { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) };
 }
 
-/** Upload a File as a raw request body via XHR, reporting progress 0..1. */
-function upload(parentId: string, file: File, onProgress?: (fraction: number) => void): Promise<NodeDto> {
+/** Send one request body via XHR, reporting bytes sent so callers can aggregate progress. */
+function xhrSend(
+  method: string,
+  url: string,
+  body: Blob,
+  opts: { contentType?: string; onBytes?: (loaded: number) => void } = {},
+): Promise<string> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
-    xhr.open('POST', `/api/files/${parentId}/upload?name=${encodeURIComponent(file.name)}`);
+    xhr.open(method, url);
     xhr.withCredentials = true;
-    xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
+    if (opts.contentType) xhr.setRequestHeader('Content-Type', opts.contentType);
     xhr.upload.onprogress = (e) => {
-      if (e.lengthComputable && onProgress) onProgress(e.loaded / e.total);
+      if (e.lengthComputable && opts.onBytes) opts.onBytes(e.loaded);
     };
     xhr.onload = () => {
       if (xhr.status >= 200 && xhr.status < 300) {
-        resolve(JSON.parse(xhr.responseText));
+        resolve(xhr.responseText);
       } else {
         let message = `Upload failed (${xhr.status})`;
         try {
           message = JSON.parse(xhr.responseText).error || message;
         } catch {
-          /* ignore */
+          /* non-JSON error body */
         }
         reject(new Error(message));
       }
     };
     xhr.onerror = () => reject(new Error('Network error during upload.'));
-    xhr.send(file);
+    xhr.send(body);
   });
+}
+
+/**
+ * Upload a file, reporting progress 0..1.
+ *
+ * Files above the server's chunk size are sent as a sequence of smaller requests (open a session,
+ * PUT each chunk, then complete). That keeps every request under any proxy request-body cap —
+ * notably Cloudflare's ~100 MB limit — so large uploads work through the tunnel. Smaller files
+ * take the single-request path.
+ */
+async function upload(
+  parentId: string,
+  file: File,
+  onProgress?: (fraction: number) => void,
+): Promise<NodeDto> {
+  const CHUNK_THRESHOLD = 32 * 1024 * 1024;
+
+  if (file.size <= CHUNK_THRESHOLD) {
+    const text = await xhrSend(
+      'POST',
+      `/api/files/${parentId}/upload?name=${encodeURIComponent(file.name)}`,
+      file,
+      {
+        contentType: file.type || 'application/octet-stream',
+        onBytes: (loaded) => onProgress?.(file.size ? loaded / file.size : 1),
+      },
+    );
+    return JSON.parse(text);
+  }
+
+  const { uploadId, chunkSize } = await req<{ uploadId: string; chunkSize: number }>(
+    `/api/files/${parentId}/upload-init`,
+    { method: 'POST' },
+  );
+
+  try {
+    let offset = 0;
+    while (offset < file.size) {
+      const end = Math.min(offset + chunkSize, file.size);
+      const slice = file.slice(offset, end);
+      const sent = offset; // bytes fully transferred before this chunk
+      await xhrSend('PUT', `/api/files/upload-chunk/${uploadId}?offset=${offset}`, slice, {
+        contentType: 'application/octet-stream',
+        onBytes: (loaded) => onProgress?.((sent + loaded) / file.size),
+      });
+      offset = end;
+      onProgress?.(offset / file.size);
+    }
+    return await req<NodeDto>(`/api/files/${parentId}/upload-complete/${uploadId}`, {
+      method: 'POST',
+      ...jsonBody({ name: file.name, mimeType: file.type || undefined }),
+    });
+  } catch (err) {
+    // Best-effort: free the server's staging space if the upload failed part-way.
+    void fetch(`/api/files/upload-chunk/${uploadId}`, { method: 'DELETE', credentials: 'include' });
+    throw err;
+  }
 }
 
 export const api = {

@@ -31,6 +31,9 @@ services:
       COOKIE_SECURE: "${COOKIE_SECURE:-false}"
       # Auto-generate a friendly link alias for every uploaded file.
       AUTO_ALIAS_ON_UPLOAD: "${AUTO_ALIAS_ON_UPLOAD:-false}"
+      # Chunk size (MB) the web UI uses for large uploads. Keep below any proxy body cap
+      # in front of the server (Cloudflare Free/Pro = 100 MB).
+      UPLOAD_CHUNK_MB: "${UPLOAD_CHUNK_MB:-32}"
       # Windows drive (WebDAV /dav). Credentials default to the admin login above.
       DAV_ENABLED: "${DAV_ENABLED:-true}"
       DAV_USERNAME: "${DAV_USERNAME:-}"

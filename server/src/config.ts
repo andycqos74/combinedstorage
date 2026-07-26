@@ -78,6 +78,9 @@ export const config = {
       : process.env.NODE_ENV === 'production',
   // When true, every uploaded file automatically gets a friendly alias derived from its name.
   autoAliasOnUpload: (process.env.AUTO_ALIAS_ON_UPLOAD ?? '').toLowerCase() === 'true',
+  // Chunk size the web UI uses for large uploads. Each chunk is a separate request, so this must
+  // stay below any proxy request-body cap in front of the server (Cloudflare Free/Pro = 100 MB).
+  uploadChunkSize: Math.max(1, Number(process.env.UPLOAD_CHUNK_MB) || 32) * 1024 * 1024,
   microsoft:
     msClientId && msClientSecret
       ? ({

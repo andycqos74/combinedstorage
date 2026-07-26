@@ -40,7 +40,8 @@ Express server (TypeScript)
 ## Features
 
 - File manager: browse folders, **create folder, upload (drag-and-drop or picker), rename,
-  delete**, copy a file's public link, and give files **friendly link aliases**.
+  delete**, copy a file's public link, and give files **friendly link aliases**. Large uploads are
+  chunked, so they are not limited by proxy request-body caps (e.g. Cloudflare's ~100 MB).
 - Combined storage meter across all connected backends.
 - Admin page to **add local-disk backends** and **connect OneDrive / Google Drive**, enable/disable
   or remove them.
@@ -140,6 +141,7 @@ across restarts and redeploys (only removing the `combinedstorage-data` volume w
 | `SESSION_SECRET` | Signs the session cookie — set a long random value | _dev placeholder_ |
 | `COOKIE_SECURE` | Require HTTPS for the session cookie | on when `NODE_ENV=production` |
 | `AUTO_ALIAS_ON_UPLOAD` | Auto-generate a friendly alias for every upload | `false` |
+| `UPLOAD_CHUNK_MB` | Chunk size (MB) the web UI uses for large uploads | `32` |
 | `DAV_ENABLED` | Serve the WebDAV drive at `/dav` | `true` |
 | `DAV_USERNAME` / `DAV_PASSWORD` | Drive Basic-auth credentials | admin login |
 | `MS_CLIENT_ID` / `MS_CLIENT_SECRET` | Azure app credentials (OneDrive) | _empty (OneDrive off)_ |
