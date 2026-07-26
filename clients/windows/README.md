@@ -14,6 +14,14 @@ powershell -ExecutionPolicy Bypass -File .\mount-combinedstorage.ps1 -Install
 The script installs WinFsp + rclone (via winget), asks for your Combined Storage password, creates
 the rclone remote, and mounts drive `Z:`. Add `-AtLogon` to also auto-mount at every logon.
 
+**About `-AtLogon`:** in an ordinary (non-elevated) PowerShell it registers a shortcut in your
+Startup folder — no admin rights needed. Run PowerShell **as Administrator** and it registers a
+hidden Scheduled Task instead, which is more robust. Either way the drive mounts at logon.
+
+**If the drive doesn't appear**, the background mount logs to
+`%LOCALAPPDATA%\CombinedStorage\rclone-mount.log`. To watch errors live instead, run the script
+without `-AtLogon` so the mount stays in the foreground.
+
 Options:
 
 ```powershell

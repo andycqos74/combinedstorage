@@ -74,27 +74,89 @@ Write-Host "Checking connection..." -ForegroundColor Cyan
 rclone lsd "${RemoteName}:" | Out-Null
 Write-Host "Connected (uploads chunked at $ChunkSize)." -ForegroundColor Green
 
+$rclonePath = (Get-Command rclone).Source
+$logDir = Join-Path $env:LOCALAPPDATA "CombinedStorage"
+New-Item -ItemType Directory -Path $logDir -Force | Out-Null
+$logFile = Join-Path $logDir "rclone-mount.log"
+
 $mountArgs = @(
   "mount", "${RemoteName}:", "${DriveLetter}:",
   "--vfs-cache-mode", "full",
   "--vfs-cache-max-age", "168h",
   "--dir-cache-time", "30s",
   "--network-mode",
-  "--volname", "Combined Storage"
+  "--volname", "Combined Storage",
+  "--log-file", $logFile,
+  "--log-level", "INFO"
 )
 
+# When the args are passed as one command line (Start-Process / Scheduled Task), any argument
+# containing a space must stay quoted — otherwise e.g. --volname "Combined Storage" would be
+# split into two arguments and rclone would fail to start.
+$mountArgLine = ($mountArgs | ForEach-Object {
+  if ($_ -match '\s') { '"' + $_ + '"' } else { $_ }
+}) -join ' '
+
+function Test-Admin {
+  $id = [Security.Principal.WindowsIdentity]::GetCurrent()
+  (New-Object Security.Principal.WindowsPrincipal($id)).IsInRole(
+    [Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
+function Register-AutoMount {
+  # Preferred: a Scheduled Task (hidden, robust) — but registering one requires elevation.
+  if (Test-Admin) {
+    try {
+      $action = New-ScheduledTaskAction -Execute $rclonePath -Argument $mountArgLine
+      $trigger = New-ScheduledTaskTrigger -AtLogon
+      $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -Hidden
+      Register-ScheduledTask -TaskName "Mount Combined Storage" -Action $action -Trigger $trigger `
+        -Settings $settings -Force -ErrorAction Stop | Out-Null
+      Write-Host "Auto-mount registered as scheduled task 'Mount Combined Storage'." -ForegroundColor Green
+      return
+    } catch {
+      Write-Warning "Could not register the scheduled task ($($_.Exception.Message)). Falling back to the Startup folder."
+    }
+  }
+
+  # Fallback: a shortcut in the user's Startup folder. Needs no admin rights.
+  try {
+    $startup = [Environment]::GetFolderPath('Startup')
+    $linkPath = Join-Path $startup "Mount Combined Storage.lnk"
+    $shell = New-Object -ComObject WScript.Shell
+    $link = $shell.CreateShortcut($linkPath)
+    $link.TargetPath = $rclonePath
+    $link.Arguments = $mountArgLine
+    $link.WindowStyle = 7   # minimized
+    $link.Description = "Mount Combined Storage as drive ${DriveLetter}:"
+    $link.Save()
+    Write-Host "Auto-mount registered via Startup shortcut: $linkPath" -ForegroundColor Green
+  } catch {
+    Write-Warning "Could not set up auto-mount: $($_.Exception.Message)"
+    Write-Host "You can still mount manually by re-running this script without -AtLogon." -ForegroundColor Yellow
+  }
+}
+
 if ($AtLogon) {
-  # Register a hidden Scheduled Task that mounts the drive at logon (persists like OneDrive).
-  $rclone = (Get-Command rclone).Source
-  $action = New-ScheduledTaskAction -Execute $rclone -Argument ($mountArgs -join " ")
-  $trigger = New-ScheduledTaskTrigger -AtLogon
-  $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -Hidden
-  Register-ScheduledTask -TaskName "Mount Combined Storage" -Action $action -Trigger $trigger `
-    -Settings $settings -Force | Out-Null
-  Write-Host "Registered logon task 'Mount Combined Storage'. It will mount ${DriveLetter}: at each logon." -ForegroundColor Green
-  Write-Host "Mounting now..." -ForegroundColor Cyan
-  Start-Process -FilePath $rclone -ArgumentList ($mountArgs -join " ") -WindowStyle Hidden
+  Register-AutoMount
+  Write-Host "Mounting ${DriveLetter}: in the background..." -ForegroundColor Cyan
+  Start-Process -FilePath $rclonePath -ArgumentList $mountArgLine -WindowStyle Hidden
+
+  # The mount runs hidden, so confirm it actually came up rather than assuming success.
+  $ready = $false
+  foreach ($i in 1..20) {
+    Start-Sleep -Milliseconds 750
+    if (Test-Path "${DriveLetter}:\") { $ready = $true; break }
+  }
+  if ($ready) {
+    Write-Host "Drive ${DriveLetter}: is mounted. Open it in File Explorer." -ForegroundColor Green
+  } else {
+    Write-Warning "Drive ${DriveLetter}: did not appear. Check the log: $logFile"
+    Write-Host "Tip: run the mount in the foreground to see errors live:" -ForegroundColor Yellow
+    Write-Host "  rclone $mountArgLine" -ForegroundColor Yellow
+  }
 } else {
   Write-Host "Mounting ${DriveLetter}: (leave this window open; Ctrl+C to unmount)..." -ForegroundColor Cyan
+  Write-Host "Log: $logFile" -ForegroundColor DarkGray
   & rclone @mountArgs
 }
