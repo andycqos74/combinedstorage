@@ -11,7 +11,7 @@ and a protocol implementation.
 | Feature | Effort | New dependencies | Verdict |
 | --- | --- | --- | --- |
 | File previews (lightbox) | ~0.5 day | none | Do first |
-| Inline image editing | ~1 day | `react-filerobot-image-editor` | Strong value |
+| Inline image editing | ~1 day | Filerobot component **or** Photopea iframe | Strong value |
 | Thumbnails (grid view) | ~1–2 days | `sharp` | Worth it for photos |
 | Inline Office editing | ~2–4 days | Collabora **or** OnlyOffice container | Biggest; do last |
 
@@ -113,7 +113,10 @@ if licence cleanliness and no user cap matter more. Either way, do it **after** 
 
 ## 3. Inline image editing
 
-Very feasible, and the best effort-to-value ratio after previews.
+Very feasible, and the best effort-to-value ratio after previews. There are two credible options
+with quite different characters.
+
+### Option A — Filerobot (self-contained)
 
 - **[`react-filerobot-image-editor`](https://github.com/scaleflex/filerobot-image-editor)** (Scaleflex,
   open source) is a drop-in React component covering crop, resize, rotate, flip, filters, annotate
@@ -122,8 +125,49 @@ Very feasible, and the best effort-to-value ratio after previews.
   `Blob` → upload it through the **existing chunked upload API**, either overwriting the original
   (which preserves its links) or saving as a new file.
 - **No CORS/canvas-tainting problem**, because the image is served from the same origin as the app.
+- Runs entirely from our own bundle: works offline, no third party, no ads, no licence fee.
+  Adds roughly 1 MB to the front-end bundle.
 
-**Effort: ~1 day**, almost entirely front-end.
+### Option B — Photopea (far more capable, third-party)
+
+Photopea is a Photoshop-class editor (layers, masks, selections, PSD/AI/Sketch support) that
+embeds as an iframe and is driven by `postMessage`. Integration is genuinely *less* code than
+Option A, because there is no component library — just an iframe and two messages:
+
+1. Embed `https://www.photopea.com#<json config>`.
+2. Load the image — **pass the bytes via `postMessage`** rather than giving Photopea a URL
+   (see privacy note below).
+3. On save, post `app.activeDocument.saveToOE("png");` into the frame.
+4. The frame posts back an **`ArrayBuffer`** of the edited image, followed by a `"done"` signal.
+5. Wrap it in a `Blob` and upload via the existing chunked upload API to overwrite the original,
+   which preserves its CDN token and friendly alias.
+
+**Effort: ~1 day, and zero bundle cost** — the editor loads from Photopea's servers.
+
+**Trade-offs — the reason this is a real decision, not a free upgrade:**
+
+- **Closed source, third-party hosted.** The editor code is served by photopea.com. This is a
+  philosophical shift for an otherwise fully self-hosted system, and it means image editing
+  **stops working offline / air-gapped**.
+- **Self-hosting is licensed, and expensive**: roughly **$500–$2,000/month** for an offline/local
+  deployment. Not realistic for a personal deployment.
+- **The free embed is ad-supported.** Removing ads or white-labelling requires a paid
+  "distributor" account, priced on traffic volume.
+- **Privacy is better than it looks, with a caveat.** Photopea does its processing
+  **client-side in the browser** — image data is not uploaded to their servers. But their
+  JavaScript runs in that frame, so if you initialise it with a *URL* you hand a public `/f/`
+  link to third-party code. Passing the bytes over `postMessage` avoids that entirely; do it
+  that way.
+- If a Content-Security-Policy is ever added, it needs `frame-src https://www.photopea.com`.
+
+### Recommendation
+
+**Filerobot** matches the original brief ("basic image editing") and keeps the system
+self-contained, private and free — the right default for this project.
+
+Choose **Photopea** if real editing power (layers, PSDs) matters more than self-containment, and
+you are comfortable with an ad-supported third-party frame. The two are not mutually exclusive:
+Filerobot could handle quick crops inline, with an "Open in Photopea" action for heavy work.
 
 ---
 
