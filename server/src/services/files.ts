@@ -308,6 +308,27 @@ export async function writeFileAtPath(input: {
   return node;
 }
 
+/** The display name of a node, or undefined if it no longer exists (used for error reporting). */
+export function nodeName(id: string): string | undefined {
+  return getNode(id)?.name;
+}
+
+/**
+ * A name that doesn't collide in the destination folder: "report.pdf" -> "report (2).pdf".
+ * Used when copying into a folder that already has an item with that name.
+ */
+export function uniqueChildName(parentId: string, name: string): string {
+  if (!childByName(parentId, name)) return name;
+  const dot = name.lastIndexOf('.');
+  const stem = dot > 0 ? name.slice(0, dot) : name;
+  const ext = dot > 0 ? name.slice(dot) : '';
+  for (let n = 2; n < 10000; n++) {
+    const candidate = `${stem} (${n})${ext}`;
+    if (!childByName(parentId, candidate)) return candidate;
+  }
+  return `${stem} (${Date.now()})${ext}`;
+}
+
 /** Copy a file or a whole folder subtree to a destination folder (WebDAV COPY). */
 export async function copyNode(
   id: string,

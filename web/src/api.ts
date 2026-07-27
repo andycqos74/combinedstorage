@@ -45,6 +45,12 @@ export interface Usage {
   backends: BackendUsage[];
 }
 
+/** Outcome of a bulk operation: some items may fail without aborting the rest. */
+export interface BulkResult {
+  succeeded: string[];
+  failed: { id: string; name?: string; error: string }[];
+}
+
 async function req<T>(path: string, opts: RequestInit = {}): Promise<T> {
   const res = await fetch(path, { credentials: 'include', ...opts });
   if (!res.ok) {
@@ -171,6 +177,18 @@ export const api = {
     req<NodeDto>(`/api/files/${id}/move`, { method: 'PATCH', ...jsonBody({ parentId }) }),
   remove: (id: string) => req<{ ok: true }>(`/api/files/${id}`, { method: 'DELETE' }),
   upload,
+
+  copy: (id: string, parentId: string) =>
+    req<NodeDto>(`/api/files/${id}/copy`, { method: 'POST', ...jsonBody({ parentId }) }),
+
+  bulkMove: (ids: string[], parentId: string) =>
+    req<BulkResult>('/api/files/bulk/move', { method: 'POST', ...jsonBody({ ids, parentId }) }),
+  bulkCopy: (ids: string[], parentId: string) =>
+    req<BulkResult>('/api/files/bulk/copy', { method: 'POST', ...jsonBody({ ids, parentId }) }),
+  bulkDelete: (ids: string[]) =>
+    req<BulkResult>('/api/files/bulk/delete', { method: 'POST', ...jsonBody({ ids }) }),
+  bulkAlias: (ids: string[]) =>
+    req<BulkResult>('/api/files/bulk/alias', { method: 'POST', ...jsonBody({ ids }) }),
 
   suggestAlias: (id: string) =>
     req<{ suggestion: string; currentAlias: string | null }>(`/api/files/${id}/alias/suggest`),

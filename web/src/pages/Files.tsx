@@ -1,266 +1,212 @@
-import { useCallback, useEffect, useRef, useState, type DragEvent } from 'react';
-import { api, errorMessage, type ListResponse, type NodeDto, type Usage } from '../api';
-import { formatBytes } from '../format';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { api, errorMessage, type BulkResult, type Usage } from '../api';
 import { StorageMeter } from '../components/StorageMeter';
+import { FilePane, type DragPayload } from '../components/FilePane';
+import { FolderPicker } from '../components/FolderPicker';
 
-interface UploadItem {
-  id: string;
-  name: string;
-  pct: number;
-  error?: string;
+/** Summarize a bulk result, surfacing partial failures rather than silently swallowing them. */
+function reportBulk(result: BulkResult, verb: string): void {
+  if (result.failed.length === 0) return;
+  const lines = result.failed.map((f) => `• ${f.name ?? f.id}: ${f.error}`).join('\n');
+  alert(
+    `${result.succeeded.length} item(s) ${verb}, ${result.failed.length} failed:\n\n${lines}`,
+  );
 }
 
 export function Files() {
-  const [folderId, setFolderId] = useState('root');
-  const [data, setData] = useState<ListResponse | null>(null);
+  const [leftFolder, setLeftFolder] = useState('root');
+  const [rightFolder, setRightFolder] = useState('root');
+  const [twoPane, setTwoPane] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
   const [usage, setUsage] = useState<Usage | null>(null);
-  const [error, setError] = useState('');
-  const [uploads, setUploads] = useState<UploadItem[]>([]);
-  const [dragOver, setDragOver] = useState(false);
-  const [copied, setCopied] = useState('');
-  const inputRef = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState(false);
+  const [picker, setPicker] = useState<'move' | 'copy' | null>(null);
 
-  const load = useCallback(async () => {
-    setError('');
+  const reloadLeft = useRef<() => void>(() => {});
+  const reloadRight = useRef<() => void>(() => {});
+
+  const refreshUsage = useCallback(async () => {
     try {
-      const [d, u] = await Promise.all([api.list(folderId), api.storage()]);
-      setData(d);
-      setUsage(u);
-    } catch (err) {
-      setError(errorMessage(err));
+      setUsage(await api.storage());
+    } catch {
+      /* meter is non-critical */
     }
-  }, [folderId]);
+  }, []);
 
   useEffect(() => {
-    load();
-  }, [load]);
+    refreshUsage();
+  }, [refreshUsage]);
 
-  async function uploadFiles(files: FileList | File[]) {
-    for (const file of Array.from(files)) {
-      const item: UploadItem = { id: crypto.randomUUID(), name: file.name, pct: 0 };
-      setUploads((prev) => [...prev, item]);
-      try {
-        await api.upload(folderId, file, (f) =>
-          setUploads((prev) =>
-            prev.map((u) => (u.id === item.id ? { ...u, pct: Math.round(f * 100) } : u)),
-          ),
-        );
-        setUploads((prev) => prev.filter((u) => u.id !== item.id));
-      } catch (err) {
-        setUploads((prev) =>
-          prev.map((u) => (u.id === item.id ? { ...u, error: errorMessage(err) } : u)),
-        );
-      }
+  /** Reload both panes and the storage meter after anything that changes data. */
+  const refreshAll = useCallback(() => {
+    reloadLeft.current();
+    reloadRight.current();
+    refreshUsage();
+  }, [refreshUsage]);
+
+  const clearSelection = () => setSelected(new Set());
+
+  // ---- drag and drop between folders/panes --------------------------------
+
+  async function handleDrop(payload: DragPayload, destFolderId: string, copy: boolean) {
+    // Dropping onto the folder the items already live in is a no-op.
+    if (payload.sourceFolderId === destFolderId && !copy) return;
+    if (payload.ids.includes(destFolderId)) {
+      alert('A folder cannot be moved into itself.');
+      return;
     }
-    await load();
-  }
-
-  function onDrop(e: DragEvent) {
-    e.preventDefault();
-    setDragOver(false);
-    if (e.dataTransfer.files?.length) uploadFiles(e.dataTransfer.files);
-  }
-
-  async function newFolder() {
-    const name = window.prompt('New folder name:');
-    if (!name) return;
+    setBusy(true);
     try {
-      await api.createFolder(folderId, name);
-      await load();
+      const result = copy
+        ? await api.bulkCopy(payload.ids, destFolderId)
+        : await api.bulkMove(payload.ids, destFolderId);
+      reportBulk(result, copy ? 'copied' : 'moved');
+      clearSelection();
+      refreshAll();
     } catch (err) {
       alert(errorMessage(err));
+    } finally {
+      setBusy(false);
     }
   }
 
-  async function rename(node: NodeDto) {
-    const name = window.prompt('Rename to:', node.name);
-    if (!name || name === node.name) return;
+  // ---- bulk actions -------------------------------------------------------
+
+  const ids = Array.from(selected);
+
+  async function runBulk(
+    fn: () => Promise<BulkResult>,
+    verb: string,
+    confirmMessage?: string,
+  ) {
+    if (ids.length === 0) return;
+    if (confirmMessage && !window.confirm(confirmMessage)) return;
+    setBusy(true);
     try {
-      await api.rename(node.id, name);
-      await load();
+      reportBulk(await fn(), verb);
+      clearSelection();
+      refreshAll();
     } catch (err) {
       alert(errorMessage(err));
+    } finally {
+      setBusy(false);
     }
   }
-
-  async function del(node: NodeDto) {
-    const suffix = node.type === 'folder' ? ' and everything inside it' : '';
-    if (!window.confirm(`Delete "${node.name}"${suffix}?`)) return;
-    try {
-      await api.remove(node.id);
-      await load();
-    } catch (err) {
-      alert(errorMessage(err));
-    }
-  }
-
-  async function copyLink(node: NodeDto) {
-    const link = node.aliasUrl ?? node.url;
-    if (!link) return;
-    try {
-      await navigator.clipboard.writeText(link);
-    } catch {
-      window.prompt('Copy this link:', link);
-    }
-    setCopied(node.id);
-    setTimeout(() => setCopied(''), 1200);
-  }
-
-  // Set, edit, or clear a file's friendly link. Prefills a unique suggestion from the server.
-  async function editAlias(node: NodeDto) {
-    let prefill = node.alias ?? '';
-    if (!prefill) {
-      try {
-        prefill = (await api.suggestAlias(node.id)).suggestion;
-      } catch {
-        /* fall back to empty */
-      }
-    }
-    const input = window.prompt(
-      `Friendly link for "${node.name}".\nEdit the path, or clear it to remove the friendly link:`,
-      prefill,
-    );
-    if (input === null) return; // cancelled
-    try {
-      if (input.trim() === '') {
-        if (node.alias) await api.clearAlias(node.id);
-      } else {
-        await api.setAlias(node.id, input.trim());
-      }
-      await load();
-    } catch (err) {
-      alert(errorMessage(err));
-    }
-  }
-
-  const children = data?.children ?? [];
 
   return (
     <div className="page">
       {usage && <StorageMeter used={usage.used} total={usage.total} />}
 
-      <div className="toolbar">
-        <nav className="crumbs">
-          {(data?.breadcrumb ?? []).map((c, i, arr) => (
-            <span key={c.id}>
-              <button className="crumb" onClick={() => setFolderId(c.id)}>
-                {c.name}
-              </button>
-              {i < arr.length - 1 && <span className="sep">/</span>}
-            </span>
-          ))}
-        </nav>
-        <div className="actions">
-          <button onClick={newFolder}>New folder</button>
-          <button className="primary" onClick={() => inputRef.current?.click()}>
-            Upload
-          </button>
-          <input
-            ref={inputRef}
-            type="file"
-            multiple
-            hidden
-            onChange={(e) => {
-              if (e.target.files?.length) uploadFiles(e.target.files);
-              e.target.value = '';
-            }}
-          />
-        </div>
+      <div className="pane-controls">
+        <button onClick={() => setTwoPane((v) => !v)}>
+          {twoPane ? 'Single pane' : 'Two panes'}
+        </button>
+        <span className="muted small">
+          Drag items onto a folder{twoPane ? ', a breadcrumb, or the other pane' : ' or a breadcrumb'} to
+          move them — hold Ctrl to copy.
+        </span>
       </div>
 
-      {error && <div className="error">{error}</div>}
-
-      {uploads.length > 0 && (
-        <div className="uploads">
-          {uploads.map((u) => (
-            <div key={u.id} className="upload-row">
-              <span className="name">{u.name}</span>
-              {u.error ? (
-                <span className="error-inline">{u.error}</span>
-              ) : (
-                <span className="progress">
-                  <span className="progress-fill" style={{ width: `${u.pct}%` }} />
-                </span>
-              )}
-            </div>
-          ))}
+      {selected.size > 0 && (
+        <div className="bulkbar">
+          <span className="bulk-count">{selected.size} selected</span>
+          <button
+            disabled={busy}
+            onClick={() =>
+              runBulk(
+                () => api.bulkDelete(ids),
+                'deleted',
+                `Delete ${selected.size} item(s)? Folders are deleted with everything inside them.`,
+              )
+            }
+            className="danger-btn"
+          >
+            Delete
+          </button>
+          <button disabled={busy} onClick={() => runBulk(() => api.bulkAlias(ids), 'linked')}>
+            Friendly links
+          </button>
+          <button disabled={busy} onClick={() => setPicker('move')}>
+            Move to…
+          </button>
+          <button disabled={busy} onClick={() => setPicker('copy')}>
+            Copy to…
+          </button>
+          {twoPane && (
+            <>
+              <button
+                disabled={busy}
+                onClick={() => runBulk(() => api.bulkMove(ids, rightFolder), 'moved')}
+              >
+                Move →
+              </button>
+              <button
+                disabled={busy}
+                onClick={() => runBulk(() => api.bulkCopy(ids, rightFolder), 'copied')}
+              >
+                Copy →
+              </button>
+              <button
+                disabled={busy}
+                onClick={() => runBulk(() => api.bulkMove(ids, leftFolder), 'moved')}
+              >
+                ← Move
+              </button>
+              <button
+                disabled={busy}
+                onClick={() => runBulk(() => api.bulkCopy(ids, leftFolder), 'copied')}
+              >
+                ← Copy
+              </button>
+            </>
+          )}
+          <button className="link" onClick={clearSelection}>
+            Clear
+          </button>
         </div>
       )}
 
-      <div
-        className={`filelist${dragOver ? ' dragover' : ''}`}
-        onDragOver={(e) => {
-          e.preventDefault();
-          setDragOver(true);
-        }}
-        onDragLeave={() => setDragOver(false)}
-        onDrop={onDrop}
-      >
-        {children.length === 0 ? (
-          <div className="empty">This folder is empty. Drop files here or use Upload.</div>
-        ) : (
-          <table>
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th className="col-size">Size</th>
-                <th className="col-actions">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {children.map((node) => (
-                <tr key={node.id}>
-                  <td className="cell-name">
-                    <span className="icon">{node.type === 'folder' ? '📁' : '📄'}</span>
-                    <div className="name-wrap">
-                      {node.type === 'folder' ? (
-                        <button className="link name-btn" onClick={() => setFolderId(node.id)}>
-                          {node.name}
-                        </button>
-                      ) : (
-                        <a
-                          href={node.aliasUrl ?? node.url ?? '#'}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="name-btn"
-                        >
-                          {node.name}
-                        </a>
-                      )}
-                      {node.type === 'file' && node.alias && (
-                        <span className="alias-line" title={node.aliasUrl ?? ''}>
-                          🔗 /f/{node.alias}
-                        </span>
-                      )}
-                    </div>
-                  </td>
-                  <td className="col-size muted">
-                    {node.type === 'file' ? formatBytes(node.size) : '—'}
-                  </td>
-                  <td className="col-actions">
-                    {node.type === 'file' && (
-                      <>
-                        <button className="link" onClick={() => copyLink(node)}>
-                          {copied === node.id ? 'Copied!' : 'Copy link'}
-                        </button>
-                        <button className="link" onClick={() => editAlias(node)}>
-                          {node.alias ? 'Edit link' : 'Friendly link'}
-                        </button>
-                      </>
-                    )}
-                    <button className="link" onClick={() => rename(node)}>
-                      Rename
-                    </button>
-                    <button className="link danger" onClick={() => del(node)}>
-                      Delete
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+      <div className={`panes${twoPane ? ' two' : ''}`}>
+        <FilePane
+          folderId={leftFolder}
+          onNavigate={setLeftFolder}
+          selected={selected}
+          onSelectedChange={setSelected}
+          onDropNodes={handleDrop}
+          onAfterChange={refreshAll}
+          registerReload={(fn) => (reloadLeft.current = fn)}
+          title={twoPane ? 'Left' : undefined}
+          compact={twoPane}
+        />
+        {twoPane && (
+          <FilePane
+            folderId={rightFolder}
+            onNavigate={setRightFolder}
+            selected={selected}
+            onSelectedChange={setSelected}
+            onDropNodes={handleDrop}
+            onAfterChange={refreshAll}
+            registerReload={(fn) => (reloadRight.current = fn)}
+            title="Right"
+            compact
+          />
         )}
       </div>
+
+      {picker && (
+        <FolderPicker
+          title={`${picker === 'move' ? 'Move' : 'Copy'} ${selected.size} item(s) to…`}
+          actionLabel={picker === 'move' ? 'Move here' : 'Copy here'}
+          onCancel={() => setPicker(null)}
+          onChoose={(destId) => {
+            setPicker(null);
+            runBulk(
+              () => (picker === 'move' ? api.bulkMove(ids, destId) : api.bulkCopy(ids, destId)),
+              picker === 'move' ? 'moved' : 'copied',
+            );
+          }}
+        />
+      )}
     </div>
   );
 }

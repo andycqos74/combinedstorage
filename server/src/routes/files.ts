@@ -75,6 +75,102 @@ filesRouter.post(
   }),
 );
 
+// ---- bulk operations (multi-select in the UI) ----
+// Each runs per item and reports individual outcomes, so one bad item (a name clash, a folder
+// moved into itself) doesn't abort the rest of the selection.
+
+interface BulkOutcome {
+  succeeded: string[];
+  failed: { id: string; name?: string; error: string }[];
+}
+
+async function runBulk(
+  ids: unknown,
+  op: (id: string) => Promise<unknown> | unknown,
+): Promise<BulkOutcome> {
+  if (!Array.isArray(ids) || ids.length === 0) {
+    throw new BadRequestError('Select at least one item.');
+  }
+  const result: BulkOutcome = { succeeded: [], failed: [] };
+  for (const raw of ids) {
+    const id = String(raw);
+    try {
+      await op(id);
+      result.succeeded.push(id);
+    } catch (err) {
+      result.failed.push({
+        id,
+        name: files.nodeName(id),
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+  return result;
+}
+
+filesRouter.post(
+  '/bulk/move',
+  json,
+  asyncHandler(async (req, res) => {
+    const parentId = String(req.body?.parentId ?? '');
+    res.json(await runBulk(req.body?.ids, (id) => files.move(id, parentId)));
+  }),
+);
+
+filesRouter.post(
+  '/bulk/copy',
+  json,
+  asyncHandler(async (req, res) => {
+    const parentId = String(req.body?.parentId ?? '');
+    res.json(
+      await runBulk(req.body?.ids, async (id) => {
+        const name = files.nodeName(id) ?? 'copy';
+        // Auto-rename rather than failing when the destination already has that name.
+        await files.copyNode(id, parentId, files.uniqueChildName(parentId, name), false);
+      }),
+    );
+  }),
+);
+
+filesRouter.post(
+  '/bulk/delete',
+  json,
+  asyncHandler(async (req, res) => {
+    res.json(await runBulk(req.body?.ids, (id) => files.remove(id)));
+  }),
+);
+
+// Give every selected file a friendly alias (skipping ones that already have one).
+filesRouter.post(
+  '/bulk/alias',
+  json,
+  asyncHandler(async (req, res) => {
+    res.json(
+      await runBulk(req.body?.ids, (id) => {
+        const { suggestion, currentAlias } = files.suggestAlias(id);
+        if (!currentAlias) files.setAlias(id, suggestion);
+      }),
+    );
+  }),
+);
+
+// Copy a single file or folder into another folder.
+filesRouter.post(
+  '/:id/copy',
+  json,
+  asyncHandler(async (req, res) => {
+    const parentId = String(req.body?.parentId ?? '');
+    const requested = req.body?.name ? String(req.body.name) : (files.nodeName(req.params.id) ?? 'copy');
+    const node = await files.copyNode(
+      req.params.id,
+      parentId,
+      files.uniqueChildName(parentId, requested),
+      false,
+    );
+    res.status(201).json(toDto(node));
+  }),
+);
+
 // ---- chunked upload (large files) ----
 // The browser splits a big file into chunks and sends each as its own request, so no single
 // request exceeds a proxy's body cap (e.g. Cloudflare's ~100 MB). Chunks are staged on disk and
