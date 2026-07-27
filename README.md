@@ -159,6 +159,24 @@ across restarts and redeploys (only removing the `combinedstorage-data` volume w
 
 ## Configuration (`.env`)
 
+The compose files read every setting via `${VAR:-default}` substitution, so values can come from a
+`.env` file next to the compose file, from the shell, or from your deployment tool's environment
+settings.
+
+**Where to put real values in a deployment:**
+
+- **Portainer:** set them on the **stack** (Stacks → your stack → *Environment variables*). They are
+  stored with the stack definition and re-applied on every deploy, including *Pull and redeploy*.
+  Values typed onto a *container* instead are lost as soon as the container is recreated, and
+  deleting the stack discards them — use *Update the stack* rather than recreating it.
+- **Plain Docker host:** keep a `.env` beside the compose file (`chmod 600`), which Compose picks up
+  automatically. This keeps secrets out of any UI database.
+- **Never** put real credentials in `.env.example` — it is committed to the repository. It is a
+  template of variable *names* only.
+
+Back up whatever you set: OAuth client secrets live only where you configured them, and losing them
+means regenerating the credentials in Azure / Google Cloud.
+
 | Variable | Purpose | Default |
 | --- | --- | --- |
 | `PORT` | Server port | `4000` |
