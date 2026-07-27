@@ -42,6 +42,9 @@ Express server (TypeScript)
 - File manager: browse folders, **create folder, upload (drag-and-drop or picker), rename,
   delete**, copy a file's public link, and give files **friendly link aliases**. Large uploads are
   chunked, so they are not limited by proxy request-body caps (e.g. Cloudflare's ~100 MB).
+- **Multi-select** with bulk delete / move / copy / generate-links, **drag-and-drop** between
+  folders and panes (Ctrl to copy), and an optional **two-pane** view.
+- **Previews** for images, PDF, video, audio and text, plus **inline image editing**.
 - Combined storage meter across all connected backends.
 - Admin page to **add local-disk backends** and **connect OneDrive / Google Drive**, enable/disable
   or remove them.
@@ -263,6 +266,27 @@ from the filename (which you can edit) and saves it; **Edit link** changes or cl
 The random token URL keeps working as a permanent fallback, so changing an alias never breaks the
 token link. Aliases are globally unique; a suffix (`-2`, `-3`, …) is added if one is taken. Set
 `AUTO_ALIAS_ON_UPLOAD=true` to give every uploaded file an alias automatically.
+
+## Previews and image editing
+
+Clicking a file name opens a **preview**: images, PDFs, video, audio and text/code render inline.
+Video and audio seek correctly because the file endpoint supports HTTP Range. Anything else offers
+a download.
+
+Images can be **edited in place** from the preview (or the *Edit* action in the list):
+
+- **Basic** (default) uses [Filerobot](https://github.com/scaleflex/filerobot-image-editor), bundled
+  with the app — crop, rotate, flip, resize, filters and annotations. It runs entirely in your
+  browser from your own server, so it works offline and involves no third party. The editor is
+  code-split, so it is only downloaded the first time you edit an image.
+- **Advanced** switches to [Photopea](https://www.photopea.com), a Photoshop-class editor with
+  layers, masks and PSD support. It is a **third-party iframe** loaded from photopea.com, and the
+  free version shows ads. Your image is processed in your browser and the bytes are handed to the
+  frame via `postMessage` — the app never gives out your file URLs. It needs internet access.
+
+Saving **replaces the file in place, keeping its id, CDN token and friendly alias**, so links you
+have already shared keep working and now serve the edited image. Photopea also offers *Save as
+copy*.
 
 ## Mount as a Windows drive (WebDAV)
 

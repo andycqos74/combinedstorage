@@ -161,6 +161,54 @@ async function upload(
   }
 }
 
+/**
+ * Replace an existing file's bytes (e.g. saving from the image editor). The file keeps its id,
+ * CDN token and friendly alias, so links already shared keep working. Large blobs are chunked
+ * exactly like uploads so proxy body caps don't apply.
+ */
+async function replaceContent(
+  file: Pick<NodeDto, 'id' | 'parentId'>,
+  blob: Blob,
+  onProgress?: (fraction: number) => void,
+): Promise<NodeDto> {
+  const CHUNK_THRESHOLD = 32 * 1024 * 1024;
+  const id = file.id;
+
+  if (blob.size <= CHUNK_THRESHOLD) {
+    const text = await xhrSend('PUT', `/api/files/${id}/content`, blob, {
+      contentType: blob.type || 'application/octet-stream',
+      onBytes: (loaded) => onProgress?.(blob.size ? loaded / blob.size : 1),
+    });
+    return JSON.parse(text);
+  }
+
+  // The chunk session is opened against the file's parent folder; only the assembly differs.
+  const { uploadId, chunkSize } = await req<{ uploadId: string; chunkSize: number }>(
+    `/api/files/${file.parentId ?? 'root'}/upload-init`,
+    { method: 'POST' },
+  );
+  try {
+    let offset = 0;
+    while (offset < blob.size) {
+      const end = Math.min(offset + chunkSize, blob.size);
+      const sent = offset;
+      await xhrSend('PUT', `/api/files/upload-chunk/${uploadId}?offset=${offset}`, blob.slice(offset, end), {
+        contentType: 'application/octet-stream',
+        onBytes: (loaded) => onProgress?.((sent + loaded) / blob.size),
+      });
+      offset = end;
+      onProgress?.(offset / blob.size);
+    }
+    return await req<NodeDto>(`/api/files/${id}/content-complete/${uploadId}`, {
+      method: 'POST',
+      ...jsonBody({ mimeType: blob.type || undefined }),
+    });
+  } catch (err) {
+    void fetch(`/api/files/upload-chunk/${uploadId}`, { method: 'DELETE', credentials: 'include' });
+    throw err;
+  }
+}
+
 export const api = {
   me: () => req<{ authenticated: boolean; username: string | null }>('/api/auth/me'),
   login: (username: string, password: string) =>
@@ -177,6 +225,7 @@ export const api = {
     req<NodeDto>(`/api/files/${id}/move`, { method: 'PATCH', ...jsonBody({ parentId }) }),
   remove: (id: string) => req<{ ok: true }>(`/api/files/${id}`, { method: 'DELETE' }),
   upload,
+  replaceContent,
 
   copy: (id: string, parentId: string) =>
     req<NodeDto>(`/api/files/${id}/copy`, { method: 'POST', ...jsonBody({ parentId }) }),

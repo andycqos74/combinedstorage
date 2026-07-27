@@ -1,6 +1,29 @@
-import { useCallback, useEffect, useRef, useState, type DragEvent } from 'react';
+import React, {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  lazy,
+  Suspense,
+  type DragEvent,
+} from 'react';
+import ReactDOM from 'react-dom';
 import { api, errorMessage, type ListResponse, type NodeDto } from '../api';
 import { formatBytes } from '../format';
+import { PreviewModal, isEditableImage } from './PreviewModal';
+
+// The image editor pulls in a large canvas library, so it is code-split: browsing the file list
+// never downloads it, and it is fetched the first time someone opens an image for editing.
+//
+// Filerobot's published build references a bare `React` global (classic JSX runtime), which an
+// ESM bundle does not provide — so publish it on window before that module is evaluated.
+const ImageEditorModal = lazy(async () => {
+  const w = window as unknown as Record<string, unknown>;
+  w.React = React;
+  w.ReactDOM = ReactDOM;
+  const m = await import('./ImageEditorModal');
+  return { default: m.ImageEditorModal };
+});
 
 /** Payload carried by an internal drag (files/folders moving within the app). */
 export interface DragPayload {
@@ -49,6 +72,8 @@ export function FilePane({
   const [uploads, setUploads] = useState<UploadItem[]>([]);
   const [dropTarget, setDropTarget] = useState<string | null>(null); // node id, or '' for the pane
   const [copied, setCopied] = useState('');
+  const [preview, setPreview] = useState<NodeDto | null>(null);
+  const [editing, setEditing] = useState<NodeDto | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const lastClicked = useRef<string | null>(null);
 
@@ -343,14 +368,9 @@ export function FilePane({
                           {node.name}
                         </button>
                       ) : (
-                        <a
-                          href={node.aliasUrl ?? node.url ?? '#'}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="name-btn"
-                        >
+                        <button className="link name-btn" onClick={() => setPreview(node)}>
                           {node.name}
-                        </a>
+                        </button>
                       )}
                       {node.type === 'file' && node.alias && (
                         <span className="alias-line" title={node.aliasUrl ?? ''}>
@@ -366,6 +386,11 @@ export function FilePane({
                     <td className="col-actions">
                       {node.type === 'file' && (
                         <>
+                          {isEditableImage(node) && (
+                            <button className="link" onClick={() => setEditing(node)}>
+                              Edit
+                            </button>
+                          )}
                           <button className="link" onClick={() => copyLink(node)}>
                             {copied === node.id ? 'Copied!' : 'Copy link'}
                           </button>
@@ -385,6 +410,38 @@ export function FilePane({
           </table>
         )}
       </div>
+
+      {preview && (
+        <PreviewModal
+          node={preview}
+          onClose={() => setPreview(null)}
+          onEdit={(n) => {
+            setPreview(null);
+            setEditing(n);
+          }}
+        />
+      )}
+
+      {editing && (
+        <Suspense
+          fallback={
+            <div className="modal-backdrop">
+              <div className="modal card">
+                <span className="muted">Loading editor…</span>
+              </div>
+            </div>
+          }
+        >
+          <ImageEditorModal
+            node={editing}
+            onClose={() => setEditing(null)}
+            onSaved={() => {
+              load();
+              onAfterChange();
+            }}
+          />
+        </Suspense>
+      )}
     </div>
   );
 }

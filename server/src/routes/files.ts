@@ -222,6 +222,47 @@ filesRouter.post(
   }),
 );
 
+// ---- replace an existing file's content (in-place edit) ----
+// Keeps the file's identity — id, CDN token and friendly alias — so links already shared keep
+// working after an edit. Small bodies go straight in; large ones reuse the chunk staging above.
+
+filesRouter.put(
+  '/:id/content',
+  asyncHandler(async (req, res) => {
+    const size = Number(req.headers['content-length'] ?? 0);
+    const contentType =
+      typeof req.headers['content-type'] === 'string' ? req.headers['content-type'] : undefined;
+    const node = await files.replaceFileContent({
+      id: req.params.id,
+      stream: req,
+      size: Number.isFinite(size) ? size : 0,
+      mimeType: contentType,
+    });
+    res.json(toDto(node));
+  }),
+);
+
+filesRouter.post(
+  '/:id/content-complete/:uploadId',
+  json,
+  asyncHandler(async (req, res) => {
+    const { id, uploadId } = req.params;
+    try {
+      const { paths, totalSize } = await chunks.sessionParts(uploadId);
+      if (paths.length === 0) throw new BadRequestError('No chunks were uploaded.');
+      const node = await files.replaceFileContent({
+        id,
+        stream: chunks.concatStream(paths),
+        size: totalSize,
+        mimeType: req.body?.mimeType || undefined,
+      });
+      res.json(toDto(node));
+    } finally {
+      await chunks.destroySession(uploadId);
+    }
+  }),
+);
+
 // Abandon an upload session (e.g. the user cancelled).
 filesRouter.delete(
   '/upload-chunk/:uploadId',

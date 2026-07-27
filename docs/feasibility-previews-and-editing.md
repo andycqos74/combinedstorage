@@ -1,19 +1,16 @@
 # Feasibility: previews/thumbnails, Office editing, image editing
 
-An assessment of three proposed features against the current codebase. Nothing here is built yet —
-this is the research and recommendation.
+An assessment of proposed features against the codebase.
 
-**Summary:** all three are feasible. Previews are nearly free because the CDN endpoint already does
-the hard parts. Image editing is a day's work with an off-the-shelf React component. Thumbnails need
-one native dependency. Office editing is the only genuinely large one, needing a second container
-and a protocol implementation.
+**Status:** previews and inline image editing are now **implemented** (see the README). Thumbnails
+and Office editing remain proposals; the analysis below stands.
 
-| Feature | Effort | New dependencies | Verdict |
+| Feature | Effort | New dependencies | Status |
 | --- | --- | --- | --- |
-| File previews (lightbox) | ~0.5 day | none | Do first |
-| Inline image editing | ~1 day | Filerobot component **or** Photopea iframe | Strong value |
-| Thumbnails (grid view) | ~1–2 days | `sharp` | Worth it for photos |
-| Inline Office editing | ~2–4 days | Collabora **or** OnlyOffice container | Biggest; do last |
+| File previews (lightbox) | ~0.5 day | none | ✅ Built |
+| Inline image editing | ~1 day | Filerobot component + Photopea iframe | ✅ Built (both engines) |
+| Thumbnails (grid view) | ~1–2 days | `sharp` | Proposed |
+| Inline Office editing | ~2–4 days | Collabora **or** OnlyOffice container | Proposed; biggest |
 
 ---
 

@@ -106,4 +106,30 @@ describe('files service', () => {
     expect(getNode(sub.id)).toBeUndefined();
     expect(getNode(f.id)).toBeUndefined();
   });
+
+  it('replaceFileContent swaps the bytes but keeps id, token and alias', async () => {
+    const node = await upload(ROOT_ID, 'photo.png', 'original');
+    files.setAlias(node.id, 'my-photo');
+    const oldBackend = getBackend(node.backend_id!)!;
+    const { root } = backendConfig<{ root: string }>(oldBackend);
+    const oldBlob = path.join(root, node.object_key!);
+
+    const edited = Buffer.from('edited-content-longer');
+    const updated = await files.replaceFileContent({
+      id: node.id,
+      stream: Readable.from(edited),
+      size: edited.length,
+      mimeType: 'image/png',
+    });
+
+    expect(updated.id).toBe(node.id);
+    expect(updated.public_token).toBe(node.public_token);
+    expect(updated.alias).toBe('my-photo');
+    expect(updated.size).toBe(edited.length);
+    expect(updated.object_key).not.toBe(node.object_key); // new bytes stored
+    expect(fs.existsSync(oldBlob)).toBe(false); // old blob cleaned up
+
+    // The CDN handle still resolves to the same node, now with the new content.
+    expect(files.fileByHandle('my-photo')?.id).toBe(node.id);
+  });
 });

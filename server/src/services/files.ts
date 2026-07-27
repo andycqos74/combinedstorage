@@ -308,6 +308,44 @@ export async function writeFileAtPath(input: {
   return node;
 }
 
+/**
+ * Replace an existing file's bytes in place, keeping its id, public_token and alias — so an
+ * edit (e.g. saving from the image editor) never breaks links that were already shared.
+ * Placement runs again, so the new content may land on a different backend.
+ */
+export async function replaceFileContent(input: {
+  id: string;
+  stream: Readable;
+  size: number;
+  mimeType?: string;
+}): Promise<NodeRow> {
+  const node = requireFile(input.id);
+  const mimeType = input.mimeType || node.mime_type || 'application/octet-stream';
+
+  const backend = await chooseBackend(input.size);
+  const { objectKey, size } = await providerFor(backend).put(input.stream, {
+    size: input.size,
+    contentType: mimeType,
+  });
+
+  const oldBackendId = node.backend_id;
+  const oldObjectKey = node.object_key;
+  updateFileBlob({ id: node.id, backendId: backend.id, objectKey, size, mimeType });
+
+  const sameObject = oldBackendId === backend.id && oldObjectKey === objectKey;
+  if (oldBackendId && oldObjectKey && !sameObject) {
+    const oldBackend = getBackend(oldBackendId);
+    if (oldBackend) {
+      try {
+        await providerFor(oldBackend).delete(oldObjectKey);
+      } catch {
+        // a stray old blob is harmless; the DB is the source of truth
+      }
+    }
+  }
+  return getNode(node.id)!;
+}
+
 /** The display name of a node, or undefined if it no longer exists (used for error reporting). */
 export function nodeName(id: string): string | undefined {
   return getNode(id)?.name;
