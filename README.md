@@ -109,6 +109,33 @@ docker build -t combinedstorage .
 docker run --rm -p 4000:4000 -e COOKIE_SECURE=false -v combinedstorage-data:/data combinedstorage
 ```
 
+### Deploying from a prebuilt image (Portainer, or any pull-based deploy)
+
+`docker-compose.yml` **builds** the image from source, so a deploy tool that only knows how to
+*pull* (e.g. Portainer's "Re-pull image") will fail with `pull access denied for combinedstorage` —
+there is no such image in a registry.
+
+For those, use **`docker-compose.ghcr.yml`**, which pulls a prebuilt image instead.
+[`.github/workflows/publish-image.yml`](.github/workflows/publish-image.yml) builds and pushes
+`ghcr.io/<owner>/combinedstorage:latest` to GitHub Container Registry on every push, so the server
+never has to compile anything.
+
+```bash
+docker compose -f docker-compose.ghcr.yml pull
+docker compose -f docker-compose.ghcr.yml up -d
+```
+
+In **Portainer**: point the stack at `docker-compose.ghcr.yml`, keep your environment variables as
+they are, and use **Pull and redeploy** for every future update.
+
+Two setup notes:
+
+- **Package visibility.** New GHCR packages are private. Either make it public (GitHub → your
+  profile → Packages → the package → Package settings → Change visibility), or add a GHCR
+  credential under Portainer → Registries using a Personal Access Token with `read:packages`.
+- **CPU architecture.** The workflow builds `linux/amd64`. If your Docker host is ARM (Raspberry
+  Pi, ARM NAS), add `linux/arm64` to the `platforms:` list in the workflow.
+
 ### Behind a reverse proxy / Cloudflare Tunnel (HTTPS)
 
 To serve the app at a public HTTPS hostname (e.g. `https://file.example.com` via `cloudflared`):

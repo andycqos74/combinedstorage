@@ -1,0 +1,66 @@
+# Combined Storage — deploy from the prebuilt image on GitHub Container Registry.
+#
+# Use this file for Portainer / any server that should PULL the image rather than build it:
+#
+#   docker compose -f docker-compose.ghcr.yml pull
+#   docker compose -f docker-compose.ghcr.yml up -d
+#
+# The image is published by .github/workflows/publish-image.yml on every push.
+# Use the sibling docker-compose.yml instead when you want to build from source locally.
+
+services:
+  app:
+    image: ghcr.io/andycqos74/combinedstorage:latest
+    pull_policy: always
+    container_name: combinedstorage
+    ports:
+      - "${PORT:-4000}:4000"
+    environment:
+      PORT: "4000"
+      DATA_DIR: "/data"
+      # How you reach the app from a browser. Behind a tunnel/proxy set this to your public
+      # HTTPS URL (e.g. https://file.amcmail.co.uk); CDN links and the OAuth callback URLs
+      # are built from it.
+      PUBLIC_BASE_URL: "${PUBLIC_BASE_URL:-http://localhost:4000}"
+      # Admin login — CHANGE THESE for anything beyond local testing.
+      ADMIN_USERNAME: "${ADMIN_USERNAME:-admin}"
+      ADMIN_PASSWORD: "${ADMIN_PASSWORD:-changeme}"
+      SESSION_SECRET: "${SESSION_SECRET:-please-change-this-to-a-long-random-string}"
+      # Set to "true" when serving over HTTPS (e.g. behind a reverse proxy).
+      COOKIE_SECURE: "${COOKIE_SECURE:-false}"
+      # Auto-generate a friendly link alias for every uploaded file.
+      AUTO_ALIAS_ON_UPLOAD: "${AUTO_ALIAS_ON_UPLOAD:-false}"
+      # Chunk size (MB) the web UI uses for large uploads. Keep below any proxy body cap
+      # in front of the server (Cloudflare Free/Pro = 100 MB).
+      UPLOAD_CHUNK_MB: "${UPLOAD_CHUNK_MB:-32}"
+      # Windows drive (WebDAV /dav). Credentials default to the admin login above.
+      DAV_ENABLED: "${DAV_ENABLED:-true}"
+      DAV_USERNAME: "${DAV_USERNAME:-}"
+      DAV_PASSWORD: "${DAV_PASSWORD:-}"
+      # ---- OneDrive (optional): fill these in to enable "Connect OneDrive" ----
+      MS_CLIENT_ID: "${MS_CLIENT_ID:-}"
+      MS_CLIENT_SECRET: "${MS_CLIENT_SECRET:-}"
+      MS_TENANT: "${MS_TENANT:-common}"
+      # Leave the redirect URIs empty to derive them from PUBLIC_BASE_URL
+      # (…/api/oauth/onedrive/callback). Set explicitly only to override.
+      MS_REDIRECT_URI: "${MS_REDIRECT_URI:-}"
+      # ---- Google Drive (optional): fill these in to enable "Connect Google Drive" ----
+      GOOGLE_CLIENT_ID: "${GOOGLE_CLIENT_ID:-}"
+      GOOGLE_CLIENT_SECRET: "${GOOGLE_CLIENT_SECRET:-}"
+      GOOGLE_REDIRECT_URI: "${GOOGLE_REDIRECT_URI:-}"
+    volumes:
+      - combinedstorage-data:/data
+    networks:
+      - default # keeps outbound internet access (OneDrive/Google APIs)
+      - tunnel # so cloudflared can reach this container at combinedstorage:4000
+    restart: unless-stopped
+
+volumes:
+  combinedstorage-data:
+
+networks:
+  # Existing Cloudflare Tunnel network (created by the cloudflared stack). The tunnel's
+  # ingress should point file.amcmail.co.uk -> http://combinedstorage:4000.
+  tunnel:
+    name: cloudflared-combinedstorage_default
+    external: true
