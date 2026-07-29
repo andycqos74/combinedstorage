@@ -31,6 +31,18 @@ export function isEditableImage(node: NodeDto): boolean {
 
 const TEXT_PREVIEW_LIMIT = 512 * 1024; // don't pull a huge file into the DOM
 
+/**
+ * The app's own view of a file, cache-busted by its modification time. The shareable link is
+ * deliberately left clean — this only affects what the preview/editor fetch, so an edit shows
+ * immediately even if the browser still holds a copy cached before the edit.
+ */
+export function versionedUrl(node: NodeDto): string {
+  const base = node.aliasUrl ?? node.url ?? '';
+  if (!base) return '';
+  const v = Date.parse(node.updatedAt) || 0;
+  return `${base}${base.includes('?') ? '&' : '?'}v=${v.toString(36)}`;
+}
+
 export function PreviewModal({
   node,
   onClose,
@@ -41,7 +53,8 @@ export function PreviewModal({
   onEdit?: (node: NodeDto) => void;
 }) {
   const kind = previewKind(node);
-  const url = node.aliasUrl ?? node.url ?? '';
+  const url = versionedUrl(node);
+  const downloadUrl = node.aliasUrl ?? node.url ?? '';
   const [text, setText] = useState<string | null>(null);
   const [textError, setTextError] = useState('');
 
@@ -92,7 +105,7 @@ export function PreviewModal({
                 Edit image
               </button>
             )}
-            <a className="button" href={url} download={node.name}>
+            <a className="button" href={downloadUrl} download={node.name}>
               Download
             </a>
             <button className="link" onClick={onClose}>

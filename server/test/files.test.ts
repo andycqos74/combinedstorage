@@ -132,4 +132,23 @@ describe('files service', () => {
     // The CDN handle still resolves to the same node, now with the new content.
     expect(files.fileByHandle('my-photo')?.id).toBe(node.id);
   });
+
+  it('changes the ETag when content is replaced, so caches cannot serve a stale copy', async () => {
+    const node = await upload(ROOT_ID, 'pic.png', 'before');
+    const etagBefore = files.fileEtag(node);
+    expect(etagBefore).toBeTruthy();
+
+    // updated_at has second-or-better resolution; make sure the timestamp really moves.
+    await new Promise((r) => setTimeout(r, 1100));
+    const body = Buffer.from('after-edit');
+    const updated = await files.replaceFileContent({
+      id: node.id,
+      stream: Readable.from(body),
+      size: body.length,
+    });
+
+    // Same public token (links survive) but a different validator (caches refetch).
+    expect(updated.public_token).toBe(node.public_token);
+    expect(files.fileEtag(updated)).not.toBe(etagBefore);
+  });
 });

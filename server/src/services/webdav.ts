@@ -1,5 +1,6 @@
 import { ROOT_ID, type NodeRow, getNode, childByName, listChildren } from '../models/nodes';
 import { listUsableBackends } from '../models/backends';
+import { fileEtag } from './files';
 
 // ---- path <-> node resolution ----------------------------------------------
 
@@ -89,7 +90,10 @@ function responseXml(href: string, node: NodeRow, quota?: { used: number; total:
     props.push(
       `<D:getcontenttype>${xmlEscape(node.mime_type ?? 'application/octet-stream')}</D:getcontenttype>`,
     );
-    if (node.public_token) props.push(`<D:getetag>"${node.public_token}"</D:getetag>`);
+    // Version-aware ETag: an in-place edit keeps the token, so a token-only value would tell
+    // clients (e.g. rclone's cache) that an edited file was unchanged.
+    const etag = fileEtag(node);
+    if (etag) props.push(`<D:getetag>${xmlEscape(etag)}</D:getetag>`);
   }
   return (
     `<D:response><D:href>${xmlEscape(href)}</D:href>` +

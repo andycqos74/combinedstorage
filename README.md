@@ -258,6 +258,12 @@ Every uploaded file gets an unguessable public URL: `GET {PUBLIC_BASE_URL}/f/<to
 no login, sends `Cache-Control` and `ETag`, and supports `Range` requests — so it can back
 `<img>`, `<video>`, downloads, etc. Use **Copy link** on any file in the UI.
 
+**Caching:** because a file's URL stays the same when its content is replaced (editing an image,
+or saving over it from the Windows drive), the endpoint sends `Cache-Control: public, no-cache`
+with a **version-aware `ETag`**. Caches may store the file but must revalidate, which is cheap —
+an unchanged file answers `304` with no body — and an edit changes the `ETag` immediately, so
+clients never serve a stale copy from a URL that still looks the same.
+
 ### Friendly links (aliases)
 
 Each file can also have a **friendly alias** that resolves at the same prefix, e.g.

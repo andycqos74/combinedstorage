@@ -69,7 +69,10 @@ async function handleGet(req: Request, res: Response): Promise<void> {
   res.setHeader('Content-Type', node.mime_type || 'application/octet-stream');
   res.setHeader('Accept-Ranges', 'bytes');
   res.setHeader('Last-Modified', new Date(node.updated_at).toUTCString());
-  if (node.public_token) res.setHeader('ETag', `"${node.public_token}"`);
+  // Version-aware: the token alone is stable across in-place edits, so rclone's cache would
+  // never notice a file had changed.
+  const etag = files.fileEtag(node);
+  if (etag) res.setHeader('ETag', etag);
 
   const range = parseRange(typeof req.headers.range === 'string' ? req.headers.range : undefined, size);
   if (range) {

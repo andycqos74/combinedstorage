@@ -21,11 +21,14 @@ const serve = asyncHandler(async (req, res) => {
   }
 
   const size = node.size ?? 0;
-  const etag = node.public_token ? `"${node.public_token}"` : undefined;
+  const etag = files.fileEtag(node);
 
   res.setHeader('Content-Type', node.mime_type || 'application/octet-stream');
   res.setHeader('Accept-Ranges', 'bytes');
-  res.setHeader('Cache-Control', 'public, max-age=3600');
+  // Files are mutable (editing replaces the bytes while keeping the URL), so caches must
+  // revalidate rather than serve a stale copy for an hour. Revalidation is cheap: an unchanged
+  // file answers 304 with no body, and the ETag changes as soon as the content does.
+  res.setHeader('Cache-Control', 'public, no-cache');
   res.setHeader('Content-Disposition', `inline; filename="${node.name.replace(/["\r\n]/g, '')}"`);
   if (etag) res.setHeader('ETag', etag);
 

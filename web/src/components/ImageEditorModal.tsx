@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import FilerobotImageEditor, { TABS, TOOLS } from 'react-filerobot-image-editor';
 import { api, errorMessage, type NodeDto } from '../api';
+import { versionedUrl } from './PreviewModal';
 
 type Engine = 'filerobot' | 'photopea';
 
@@ -28,7 +29,8 @@ export function ImageEditorModal({
   const [engine, setEngine] = useState<Engine>('filerobot');
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState('');
-  const url = node.aliasUrl ?? node.url ?? '';
+  // Load the current bytes, not whatever the browser cached before a previous edit.
+  const url = versionedUrl(node);
 
   const save = useCallback(
     async (blob: Blob, asCopy: boolean) => {

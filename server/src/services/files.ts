@@ -346,6 +346,19 @@ export async function replaceFileContent(input: {
   return getNode(node.id)!;
 }
 
+/**
+ * Cache validator for a file's current bytes.
+ *
+ * It must fold in `updated_at`, not just the token: an in-place edit deliberately keeps the same
+ * token so shared links survive, so a token-only ETag would let browsers and caches keep serving
+ * the pre-edit image forever.
+ */
+export function fileEtag(node: NodeRow): string | undefined {
+  if (!node.public_token) return undefined;
+  const version = Date.parse(node.updated_at) || 0;
+  return `"${node.public_token}-${version.toString(36)}"`;
+}
+
 /** The display name of a node, or undefined if it no longer exists (used for error reporting). */
 export function nodeName(id: string): string | undefined {
   return getNode(id)?.name;
