@@ -25,6 +25,8 @@ import type { ByteRange, GetResult } from '../storage/provider';
 import { chooseBackend } from './placement';
 import { config } from '../config';
 import { BadRequestError, NotFoundError } from '../util/errors';
+import { Readable as NodeReadable } from 'node:stream';
+import { collectStream, convertForUpload, shouldAttemptConversion } from './images';
 
 // ---- helpers ---------------------------------------------------------------
 
@@ -85,6 +87,41 @@ function normalizeAlias(raw: string): string {
   }
   if (slug.length > 128) throw new BadRequestError('Link is too long (max 128 characters).');
   return slug;
+}
+
+interface IncomingContent {
+  stream: Readable;
+  size: number;
+  name: string;
+  mimeType: string;
+}
+
+/**
+ * Apply the global image rule to incoming bytes before they are placed and stored.
+ *
+ * Conversion happens here — ahead of chooseBackend — so placement and quota see the real stored
+ * size rather than the pre-conversion one. Anything that isn't a convertible image, is too large
+ * to buffer, or wouldn't get smaller is passed straight through untouched.
+ */
+async function applyUploadConversion(
+  input: IncomingContent,
+  source: 'web' | 'drive' = 'web',
+): Promise<IncomingContent> {
+  if (source === 'drive' && !config.images.convertOnDrive) return input;
+  if (!shouldAttemptConversion(input.mimeType, input.size)) return input;
+
+  const original = await collectStream(input.stream);
+  const converted = await convertForUpload(original, input.name, input.mimeType);
+  if (!converted) {
+    // Unchanged, but the stream is already consumed — hand back the buffered bytes.
+    return { ...input, stream: NodeReadable.from(original), size: original.length };
+  }
+  return {
+    stream: NodeReadable.from(converted.buffer),
+    size: converted.buffer.length,
+    name: converted.name,
+    mimeType: converted.mimeType,
+  };
 }
 
 function requireFolder(id: string, label = 'Folder'): NodeRow {
@@ -151,15 +188,24 @@ export async function uploadFile(input: {
   mimeType?: string;
 }): Promise<NodeRow> {
   const parent = requireFolder(input.parentId, 'Parent folder');
-  const name = validateName(input.name);
-  if (childByName(input.parentId, name)) {
+  const requestedName = validateName(input.name);
+  if (childByName(input.parentId, requestedName)) {
     throw new BadRequestError('An item with that name already exists here.');
   }
 
-  const mimeType = input.mimeType || mimeLookup(name) || 'application/octet-stream';
-  const backend = await chooseBackend(input.size);
-  const { objectKey, size } = await providerFor(backend).put(input.stream, {
+  const content = await applyUploadConversion({
+    stream: input.stream,
     size: input.size,
+    name: requestedName,
+    mimeType: input.mimeType || mimeLookup(requestedName) || 'application/octet-stream',
+  });
+  // Conversion can change the extension (photo.jpg -> photo.webp), which may collide.
+  const name = content.name === requestedName ? requestedName : uniqueChildName(input.parentId, content.name);
+  const mimeType = content.mimeType;
+
+  const backend = await chooseBackend(content.size);
+  const { objectKey, size } = await providerFor(backend).put(content.stream, {
+    size: content.size,
     contentType: mimeType,
   });
 
@@ -261,16 +307,32 @@ export async function writeFileAtPath(input: {
   mimeType?: string;
 }): Promise<NodeRow> {
   const parent = requireFolder(input.parentId, 'Parent folder');
-  const name = validateName(input.name);
-  const existing = childByName(input.parentId, name);
+  const requestedName = validateName(input.name);
+  const existingAtRequested = childByName(input.parentId, requestedName);
+  if (existingAtRequested && existingAtRequested.type === 'folder') {
+    throw new BadRequestError('A folder with that name already exists here.');
+  }
+
+  const content = await applyUploadConversion(
+    {
+      stream: input.stream,
+      size: input.size,
+      name: requestedName,
+      mimeType: input.mimeType || mimeLookup(requestedName) || 'application/octet-stream',
+    },
+    'drive',
+  );
+  const name = content.name;
+  const mimeType = content.mimeType;
+  // Re-resolve after a possible extension change so a repeat save overwrites the same node.
+  const existing = name === requestedName ? existingAtRequested : childByName(input.parentId, name);
   if (existing && existing.type === 'folder') {
     throw new BadRequestError('A folder with that name already exists here.');
   }
 
-  const mimeType = input.mimeType || mimeLookup(name) || 'application/octet-stream';
-  const backend = await chooseBackend(input.size);
-  const { objectKey, size } = await providerFor(backend).put(input.stream, {
-    size: input.size,
+  const backend = await chooseBackend(content.size);
+  const { objectKey, size } = await providerFor(backend).put(content.stream, {
+    size: content.size,
     contentType: mimeType,
   });
 
@@ -494,6 +556,12 @@ export async function openFile(node: NodeRow, range?: ByteRange): Promise<GetRes
   const backend = getBackend(node.backend_id);
   if (!backend) throw new NotFoundError('Storage backend for this file is missing.');
   return providerFor(backend).get(node.object_key, range);
+}
+
+/** Read a whole file into memory (used to render image variants). */
+export async function readFileBytes(node: NodeRow): Promise<Buffer> {
+  const { stream } = await openFile(node);
+  return collectStream(stream);
 }
 
 /** A backend-native direct URL for the file, if its provider offers one (else null). */

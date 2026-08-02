@@ -45,6 +45,8 @@ Express server (TypeScript)
 - **Multi-select** with bulk delete / move / copy / generate-links, **drag-and-drop** between
   folders and panes (Ctrl to copy), and an optional **two-pane** view.
 - **Previews** for images, PDF, video, audio and text, plus **inline image editing**.
+- Optional **image conversion on upload** (resize + WebP) and **on-demand sizes** from the file
+  URL (`?w=800`, `?w=400&h=400`) for CDN use.
 - Combined storage meter across all connected backends.
 - Admin page to **add local-disk backends** and **connect OneDrive / Google Drive**, enable/disable
   or remove them.
@@ -190,6 +192,11 @@ means regenerating the credentials in Azure / Google Cloud.
 | `COOKIE_SECURE` | Require HTTPS for the session cookie | on when `NODE_ENV=production` |
 | `AUTO_ALIAS_ON_UPLOAD` | Auto-generate a friendly alias for every upload | `false` |
 | `UPLOAD_CHUNK_MB` | Chunk size (MB) the web UI uses for large uploads | `32` |
+| `IMAGE_CONVERT_ON_UPLOAD` | Resize/re-encode uploaded images (**replaces the file**) | `false` |
+| `IMAGE_MAX_DIMENSION` / `IMAGE_FORMAT` / `IMAGE_QUALITY` | Conversion rule | `2560` / `webp` / `82` |
+| `IMAGE_MAX_CONVERT_MB` | Images above this stream through unconverted | `50` |
+| `IMAGE_CONVERT_ON_DRIVE` | Also convert writes from the Windows drive | `true` |
+| `IMAGE_VARIANTS_ENABLED` | Serve `?w=…&fmt=…` renditions from the file URL | `true` |
 | `DAV_ENABLED` | Serve the WebDAV drive at `/dav` | `true` |
 | `DAV_USERNAME` / `DAV_PASSWORD` | Drive Basic-auth credentials | admin login |
 | `MS_CLIENT_ID` / `MS_CLIENT_SECRET` | Azure app credentials (OneDrive) | _empty (OneDrive off)_ |
@@ -293,6 +300,47 @@ Images can be **edited in place** from the preview (or the *Edit* action in the 
 Saving **replaces the file in place, keeping its id, CDN token and friendly alias**, so links you
 have already shared keep working and now serve the edited image. Photopea also offers *Save as
 copy*.
+
+## Image conversion and on-demand sizes
+
+Two independent features, both powered by [sharp](https://sharp.pixelplumbing.com/).
+
+### Convert on upload (optional, saves disk)
+
+With `IMAGE_CONVERT_ON_UPLOAD=true`, uploaded images are auto-oriented from EXIF, scaled so the
+longest edge is at most `IMAGE_MAX_DIMENSION` (default 2560), re-encoded to `IMAGE_FORMAT`
+(default WebP), and stripped of metadata. A 4000×3000 JPEG typically drops by **90%+**.
+
+- **This replaces the stored file and the original is not kept**, so it is **off by default** —
+  enabling it is a deliberate choice, and an upgrade never silently rewrites your data.
+- The extension changes with the format (`photo.jpg` → `photo.webp`), and the name is
+  de-duplicated if that collides.
+- Skipped automatically for: non-images, **SVG** (vector) and **GIF** (animation), files above
+  `IMAGE_MAX_CONVERT_MB`, and any image where re-encoding would come out *larger*.
+- Conversion runs before backend placement, so quota and placement see the real stored size.
+- It applies to the Windows drive too. Because that renames the file after a write, which sync
+  clients do not expect, set `IMAGE_CONVERT_ON_DRIVE=false` to keep the drive byte-exact while
+  still converting web uploads.
+
+### On-demand sizes (non-destructive, great for CDN use)
+
+Any stored image can be requested at a different size or format by adding query parameters to its
+public URL — the original is untouched and renditions are rendered once then cached on disk:
+
+```
+/f/<handle>?w=800                 # 800px wide
+/f/<handle>?w=400&h=400           # 400×400, cropped to fill
+/f/<handle>?w=300&h=300&fit=inside  # fits inside 300×300, aspect preserved
+/f/<handle>?w=800&fmt=jpeg&q=70   # different format/quality
+```
+
+`fit=cover` (the default) crops to fill, which is what fixed-ratio uses need — a 16:9 slider is
+`?w=1920&h=1080`, a square thumbnail is `?w=400&h=400`. Variants never upscale. The cache key
+includes the file's content version, so editing an image invalidates its renditions automatically,
+and unused ones are swept after 30 days. Disable with `IMAGE_VARIANTS_ENABLED=false`.
+
+> Named presets (`?preset=slider`) are a natural next step on top of this — the query form above is
+> already the underlying mechanism.
 
 ## Mount as a Windows drive (WebDAV)
 

@@ -15,6 +15,7 @@ import { cdnRouter } from './routes/cdn';
 import { webdavRouter } from './routes/webdav';
 import { webdavChunksRouter } from './routes/webdavChunks';
 import { sweepStaleSessions } from './services/chunks';
+import { sweepVariants } from './services/images';
 import { aggregateQuota } from './services/quota';
 
 migrate();
@@ -55,6 +56,12 @@ if (config.dav.enabled) {
     if (n > 0) console.log(`Cleaned up ${n} stale chunked-upload session(s).`);
   });
 }
+
+// Drop image renditions that have not been requested in a long time.
+void sweepVariants().then((n) => {
+  // eslint-disable-next-line no-console
+  if (n > 0) console.log(`Cleaned up ${n} stale image variant(s).`);
+});
 
 // --- Public (no auth): CDN file serving + OAuth callback + login ---
 app.use('/f', cdnRouter);

@@ -1,15 +1,66 @@
-import { Router } from 'express';
+import { Router, type Request, type Response } from 'express';
 import { asyncHandler } from '../util/asyncHandler';
 import { parseRange } from '../util/range';
 import * as files from '../services/files';
+import * as images from '../services/images';
+import type { NodeRow } from '../models/nodes';
 
 export const cdnRouter = Router();
+
+/**
+ * Serve a resized/reformatted rendition of an image, e.g. ?w=800&fmt=webp or ?w=400&h=400.
+ * Renditions are rendered once and cached on disk; the cache key includes the file's content
+ * version, so editing a file invalidates its variants automatically.
+ */
+async function serveVariant(
+  req: Request,
+  res: Response,
+  node: NodeRow,
+  params: images.VariantParams,
+): Promise<void> {
+  const version = String(Date.parse(node.updated_at) || 0);
+  const cachePath = images.variantCachePath(node.public_token ?? node.id, version, params);
+  const mimeType = images.variantMimeType(params, node.mime_type || 'application/octet-stream');
+
+  // A variant's validator must cover both the source version and the requested transform.
+  const etag = `"${node.public_token ?? node.id}-${version}-${params.w ?? ''}x${params.h ?? ''}-${params.fit}-${params.fmt ?? ''}-${params.q}"`;
+  res.setHeader('Content-Type', mimeType);
+  res.setHeader('Cache-Control', 'public, no-cache');
+  res.setHeader('ETag', etag);
+  if (req.headers['if-none-match'] === etag) {
+    res.status(304).end();
+    return;
+  }
+
+  let out = await images.readCachedVariant(cachePath);
+  if (!out) {
+    const source = await files.readFileBytes(node);
+    out = await images.renderVariant(source, params);
+    await images.writeCachedVariant(cachePath, out);
+  }
+
+  res.setHeader('Content-Length', String(out.length));
+  if (req.method === 'HEAD') {
+    res.end();
+    return;
+  }
+  res.end(out);
+}
 
 const serve = asyncHandler(async (req, res) => {
   // The handle can be a file's permanent token or its friendly alias.
   const node = files.fileByHandle(req.params.token);
   if (!node) {
     res.status(404).send('Not found');
+    return;
+  }
+
+  // Image renditions are requested with query params; anything else serves the stored file.
+  const variant = images.isConvertibleImage(node.mime_type)
+    ? images.parseVariantParams(req.query as Record<string, unknown>)
+    : null;
+  if (variant) {
+    await serveVariant(req, res, node, variant);
     return;
   }
 

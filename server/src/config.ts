@@ -56,6 +56,8 @@ export const config = {
   localRoot: path.join(dataDir, 'local'),
   /** Staging area for in-progress chunked WebDAV uploads (one subdir per upload session). */
   chunkRoot: path.join(dataDir, 'chunks'),
+  /** Disk cache for on-demand image variants (resized/reformatted renditions). */
+  variantRoot: path.join(dataDir, 'variants'),
   /** Directory containing the built web SPA (served in production). */
   webDist: path.resolve(serverDir, '..', 'web', 'dist'),
   admin: {
@@ -81,6 +83,28 @@ export const config = {
   // Chunk size the web UI uses for large uploads. Each chunk is a separate request, so this must
   // stay below any proxy request-body cap in front of the server (Cloudflare Free/Pro = 100 MB).
   uploadChunkSize: Math.max(1, Number(process.env.UPLOAD_CHUNK_MB) || 32) * 1024 * 1024,
+  images: {
+    /**
+     * Rewrite uploaded images (resize + re-encode) to save space. This REPLACES the stored file,
+     * so it stays off unless explicitly enabled — an upgrade must never silently rewrite data.
+     */
+    convertOnUpload: (process.env.IMAGE_CONVERT_ON_UPLOAD ?? '').toLowerCase() === 'true',
+    /**
+     * Whether conversion also applies to writes from the WebDAV drive. Converting renames the
+     * file (photo.jpg -> photo.webp), which a sync client does not expect after writing, so this
+     * can be turned off independently while keeping conversion for web uploads.
+     */
+    convertOnDrive: (process.env.IMAGE_CONVERT_ON_DRIVE ?? 'true').toLowerCase() !== 'false',
+    /** Longest edge, in pixels, that an uploaded image is scaled down to (never scaled up). */
+    maxDimension: Math.max(16, Number(process.env.IMAGE_MAX_DIMENSION) || 2560),
+    /** Target format for converted uploads. */
+    format: (process.env.IMAGE_FORMAT || 'webp').toLowerCase(),
+    quality: Math.min(100, Math.max(1, Number(process.env.IMAGE_QUALITY) || 82)),
+    /** Images larger than this are streamed through untouched (conversion needs them in memory). */
+    maxConvertBytes: Math.max(1, Number(process.env.IMAGE_MAX_CONVERT_MB) || 50) * 1024 * 1024,
+    /** Serve on-demand renditions from /f/<handle>?w=…&fmt=… (non-destructive, so on by default). */
+    variantsEnabled: (process.env.IMAGE_VARIANTS_ENABLED ?? 'true').toLowerCase() !== 'false',
+  },
   microsoft:
     msClientId && msClientSecret
       ? ({

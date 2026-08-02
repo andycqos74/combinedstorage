@@ -34,6 +34,14 @@ services:
       # Chunk size (MB) the web UI uses for large uploads. Keep below any proxy body cap
       # in front of the server (Cloudflare Free/Pro = 100 MB).
       UPLOAD_CHUNK_MB: "${UPLOAD_CHUNK_MB:-32}"
+      # ---- Image conversion (off by default: converting replaces the stored file) ----
+      IMAGE_CONVERT_ON_UPLOAD: "${IMAGE_CONVERT_ON_UPLOAD:-false}"
+      IMAGE_MAX_DIMENSION: "${IMAGE_MAX_DIMENSION:-2560}"
+      IMAGE_FORMAT: "${IMAGE_FORMAT:-webp}"
+      IMAGE_QUALITY: "${IMAGE_QUALITY:-82}"
+      IMAGE_MAX_CONVERT_MB: "${IMAGE_MAX_CONVERT_MB:-50}"
+      IMAGE_CONVERT_ON_DRIVE: "${IMAGE_CONVERT_ON_DRIVE:-true}"
+      IMAGE_VARIANTS_ENABLED: "${IMAGE_VARIANTS_ENABLED:-true}"
       # Windows drive (WebDAV /dav). Credentials default to the admin login above.
       DAV_ENABLED: "${DAV_ENABLED:-true}"
       DAV_USERNAME: "${DAV_USERNAME:-}"
