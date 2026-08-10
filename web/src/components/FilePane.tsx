@@ -10,7 +10,7 @@ import React, {
 import ReactDOM from 'react-dom';
 import { api, errorMessage, type ListResponse, type NodeDto } from '../api';
 import { formatBytes } from '../format';
-import { PreviewModal, isEditableImage } from './PreviewModal';
+import { PreviewModal, isEditableImage, hasThumbnail, thumbnailUrl } from './PreviewModal';
 
 // The image editor pulls in a large canvas library, so it is code-split: browsing the file list
 // never downloads it, and it is fetched the first time someone opens an image for editing.
@@ -74,6 +74,15 @@ export function FilePane({
   const [copied, setCopied] = useState('');
   const [preview, setPreview] = useState<NodeDto | null>(null);
   const [editing, setEditing] = useState<NodeDto | null>(null);
+  // Remembered across visits; a media folder is far easier to work with as a grid.
+  const [view, setView] = useState<'list' | 'grid'>(
+    () => (localStorage.getItem('cs.view') === 'grid' ? 'grid' : 'list'),
+  );
+
+  function changeView(next: 'list' | 'grid') {
+    setView(next);
+    localStorage.setItem('cs.view', next);
+  }
   const inputRef = useRef<HTMLInputElement>(null);
   const lastClicked = useRef<string | null>(null);
 
@@ -100,7 +109,10 @@ export function FilePane({
 
   function toggle(node: NodeDto, e: React.MouseEvent | React.ChangeEvent) {
     const next = new Set(selected);
-    const shift = 'shiftKey' in e && (e as React.MouseEvent).shiftKey;
+    // A checkbox's ChangeEvent doesn't carry modifier keys, but the native event it wraps does.
+    const shift =
+      ('shiftKey' in e && (e as React.MouseEvent).shiftKey) ||
+      (e.nativeEvent as MouseEvent | undefined)?.shiftKey === true;
 
     if (shift && lastClicked.current) {
       // Select the contiguous range between the previous click and this one.
@@ -276,6 +288,22 @@ export function FilePane({
           ))}
         </nav>
         <div className="actions">
+          <div className="engine-switch view-switch" role="group" aria-label="View mode">
+            <button
+              className={view === 'list' ? 'active' : ''}
+              onClick={() => changeView('list')}
+              title="List view"
+            >
+              ☰
+            </button>
+            <button
+              className={view === 'grid' ? 'active' : ''}
+              onClick={() => changeView('grid')}
+              title="Grid view with thumbnails"
+            >
+              ▦
+            </button>
+          </div>
           <button onClick={newFolder}>New folder</button>
           <button className="primary" onClick={() => inputRef.current?.click()}>
             Upload
@@ -320,6 +348,52 @@ export function FilePane({
       >
         {children.length === 0 ? (
           <div className="empty">This folder is empty. Drop files here or use Upload.</div>
+        ) : view === 'grid' ? (
+          <div className="tiles">
+            {children.map((node) => (
+              <div
+                key={node.id}
+                className={
+                  'tile' +
+                  (selected.has(node.id) ? ' selected' : '') +
+                  (dropTarget === node.id ? ' droptarget' : '')
+                }
+                draggable
+                onDragStart={(e) => onDragStart(e, node)}
+                onDragOver={(e) => node.type === 'folder' && onDragOverTarget(e, node.id)}
+                onDragLeave={() => dropTarget === node.id && setDropTarget(null)}
+                onDrop={(e) => node.type === 'folder' && onDropTarget(e, node.id)}
+              >
+                <input
+                  type="checkbox"
+                  className="tile-check"
+                  checked={selected.has(node.id)}
+                  onChange={(e) => toggle(node, e)}
+                  onClick={(e) => e.stopPropagation()}
+                  aria-label={`Select ${node.name}`}
+                />
+                <button
+                  className="tile-open"
+                  onClick={() => (node.type === 'folder' ? onNavigate(node.id) : setPreview(node))}
+                  title={node.name}
+                >
+                  <span className="tile-thumb">
+                    {node.type === 'folder' ? (
+                      <span className="tile-icon">📁</span>
+                    ) : hasThumbnail(node) ? (
+                      <img src={thumbnailUrl(node)} alt="" loading="lazy" />
+                    ) : (
+                      <span className="tile-icon">📄</span>
+                    )}
+                  </span>
+                  <span className="tile-name">{node.name}</span>
+                </button>
+                <span className="tile-meta muted">
+                  {node.type === 'file' ? formatBytes(node.size) : 'Folder'}
+                </span>
+              </div>
+            ))}
+          </div>
         ) : (
           <table>
             <thead>

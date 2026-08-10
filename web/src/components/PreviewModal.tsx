@@ -43,6 +43,23 @@ export function versionedUrl(node: NodeDto): string {
   return `${base}${base.includes('?') ? '&' : '?'}v=${v.toString(36)}`;
 }
 
+/** Types the server can render a thumbnail for (matches its convertible-image set). */
+export function hasThumbnail(node: NodeDto): boolean {
+  return /^image\/(jpeg|png|webp|tiff|avif)$/.test((node.mimeType ?? '').toLowerCase());
+}
+
+/**
+ * A square, cropped thumbnail from the server's on-demand variant endpoint. The `v` parameter
+ * only busts the browser cache — the server keys its own cache on the file's content version.
+ */
+export function thumbnailUrl(node: NodeDto, size = 320): string {
+  const base = node.aliasUrl ?? node.url ?? '';
+  if (!base) return '';
+  const v = Date.parse(node.updatedAt) || 0;
+  const sep = base.includes('?') ? '&' : '?';
+  return `${base}${sep}w=${size}&h=${size}&fit=cover&v=${v.toString(36)}`;
+}
+
 export function PreviewModal({
   node,
   onClose,

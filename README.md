@@ -44,7 +44,8 @@ Express server (TypeScript)
   chunked, so they are not limited by proxy request-body caps (e.g. Cloudflare's ~100 MB).
 - **Multi-select** with bulk delete / move / copy / generate-links, **drag-and-drop** between
   folders and panes (Ctrl to copy), and an optional **two-pane** view.
-- **Previews** for images, PDF, video, audio and text, plus **inline image editing**.
+- **Previews** for images, PDF, video, audio and text, **thumbnail grid view**, plus **inline
+  image editing**.
 - Optional **image conversion on upload** (resize + WebP) and **on-demand sizes** from the file
   URL (`?w=800`, `?w=400&h=400`) for CDN use.
 - Combined storage meter across all connected backends.
@@ -341,6 +342,11 @@ and unused ones are swept after 30 days. Disable with `IMAGE_VARIANTS_ENABLED=fa
 
 > Named presets (`?preset=slider`) are a natural next step on top of this — the query form above is
 > already the underlying mechanism.
+
+The file browser uses this too: switch a folder to **grid view** (the ☰ / ▦ toggle) to see image
+thumbnails instead of a list. Thumbnails are 320px square crops served from the same variant
+endpoint, so they are rendered once and cached rather than downloading full-size images. The
+choice of list or grid is remembered.
 
 ## Mount as a Windows drive (WebDAV)
 
