@@ -199,6 +199,54 @@ Verify the container came back on the same data (`docker exec combinedstorage ls
 confirm the site loads through the tunnel. To roll back, paste the two build lines back: the old
 locally-built `combinedstorage:latest` image is still on the host.
 
+#### If the stack has no Editor tab
+
+Portainer only offers the editor for stacks it created itself. A stack brought up with the
+`docker compose` CLI shows in Portainer as *limited* / external with no editor, and a Git-backed
+stack is edited by pushing to the repo and using **Pull and redeploy**. In either case the host
+shell works. Start by asking the running container what it is part of:
+
+```bash
+docker inspect combinedstorage --format '
+container: {{.Name}}
+image    : {{.Config.Image}}
+volume   : {{range .Mounts}}{{.Name}} {{end}}
+project  : {{index .Config.Labels "com.docker.compose.project"}}
+workdir  : {{index .Config.Labels "com.docker.compose.project.working_dir"}}
+files    : {{index .Config.Labels "com.docker.compose.project.config_files"}}'
+```
+
+If `workdir` names a directory you can reach, edit the compose file there and redeploy with the
+**same project name** so the volume is reused:
+
+```bash
+cd <workdir>
+docker compose -p <project> up -d
+```
+
+If there is no usable working directory — or you would rather not depend on getting the project
+name right — pin the volume by its absolute name instead. Declaring it `external` makes the volume
+reference independent of the project name, which is what otherwise silently creates an empty one:
+
+```yaml
+volumes:
+  combinedstorage-data:
+    name: combinedstorage_combinedstorage-data   # exact name from the inspect above
+    external: true
+```
+
+Copy `docker-compose.ghcr.yml`, replace its `volumes:` block with that, and bring it up anywhere on
+the host. The old container must be removed first, since the new one claims the same name —
+`docker rm -f combinedstorage` (this does **not** touch the volume; only `docker compose down -v`
+would).
+
+Carry the environment across as well. This prints the running container's full environment, so
+treat the output as secret — it contains `SESSION_SECRET` and any OAuth client secrets:
+
+```bash
+docker inspect combinedstorage --format '{{range .Config.Env}}{{println .}}{{end}}'
+```
+
 Two setup notes:
 
 - **Package visibility.** New GHCR packages are private. Either make it public (GitHub → your
