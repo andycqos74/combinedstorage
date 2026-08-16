@@ -157,12 +157,22 @@ they are, and use **Pull and redeploy** for every future update.
 
 #### Migrating an existing build-from-source stack
 
-> **Edit the existing stack — do not create a new one.** Portainer prefixes volume names with the
-> stack name, so a stack named `combinedstorage` owns `combinedstorage_combinedstorage-data`. Deploy
-> the same compose under a new name and Docker creates
-> `<newname>_combinedstorage-data` instead: an empty volume, and every file appears to have
-> vanished. (Nothing is deleted — the old volume is still there — but the swap is confusing to undo
-> under pressure.)
+> **Edit the existing stack — do not create a new one.** Compose prefixes volume names with the
+> *project* name, which for a Portainer stack is the stack's name. Deploy the same compose under a
+> different name and you get `<newname>_combinedstorage-data`: an empty volume, and every file
+> appears to have vanished. (Nothing is deleted — the old volume is still there — but it is a
+> confusing thing to undo under pressure.)
+>
+> Do not assume the project name matches the container name; they are often different. Read the
+> real one off the running container before changing anything:
+>
+> ```bash
+> docker inspect combinedstorage \
+>   --format 'project={{index .Config.Labels "com.docker.compose.project"}} volume={{range .Mounts}}{{.Name}}{{end}}'
+> ```
+>
+> As long as the project name is unchanged, `docker-compose.ghcr.yml` resolves to the *same* volume
+> as `docker-compose.yml` — the data carries over with nothing extra to configure.
 
 `docker-compose.ghcr.yml` is otherwise byte-for-byte compatible with `docker-compose.yml`: the same
 `container_name`, the same volume, the same networks and the same environment. Only the image
@@ -201,9 +211,21 @@ locally-built `combinedstorage:latest` image is still on the host.
 
 #### If the stack has no Editor tab
 
-Portainer only offers the editor for stacks it created itself. A stack brought up with the
-`docker compose` CLI shows in Portainer as *limited* / external with no editor, and a Git-backed
-stack is edited by pushing to the repo and using **Pull and redeploy**. In either case the host
+If `workdir` above is `/data/compose/<n>`, the stack **is** Portainer's — `/data/compose` is its
+own stack directory — and the missing editor means it was deployed **from a Git repository**.
+Portainer replaces the Web editor with repository settings for those, because the repo is the
+source of truth. Nothing needs editing by hand:
+
+1. Open the stack, and in its Git settings change **Compose path** from `docker-compose.yml` to
+   `docker-compose.ghcr.yml`.
+2. Optionally add an `IMAGE_TAG` environment variable; it defaults to `latest`.
+3. **Pull and redeploy.**
+
+The stack name — and therefore the Compose project — does not change, so the existing volume is
+reused automatically.
+
+Otherwise Portainer only offers the editor for stacks it created itself, and a stack brought up
+with the `docker compose` CLI shows as *limited* / external with no editor. In that case the host
 shell works. Start by asking the running container what it is part of:
 
 ```bash
