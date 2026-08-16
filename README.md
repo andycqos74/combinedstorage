@@ -54,24 +54,6 @@ Express server (TypeScript)
 - Automatic upload placement (most-free-space first) with a clear "insufficient space" error.
 - Public, cacheable file URLs with HTTP **Range** support (media seeking) and ETag/`304`.
 - **Mount as a Windows drive** (WebDAV endpoint at `/dav`) via rclone + WinFsp.
-- Collapsible sidebar with quick-access folders and per-backend usage, and a "stored on" column
-  showing which backend physically holds each file.
-
-## Interface
-
-The UI follows the "Luggage" design: dark navy chrome (header and sidebar) around a light content
-column. Everything visual is driven by CSS custom properties defined at the top of
-`web/src/styles.css` — colours, radii, shadows and the two type families — so a retheme means
-editing tokens rather than hunting through components. Two conventions worth knowing:
-
-- **No inline styles for static values.** Inline `style` is used only where a value is genuinely
-  dynamic (a meter's width, a backend's colour); everything else is a class.
-- **File rows adapt to their pane, not the window.** `.pane` is a CSS container, so the row's
-  "stored on" and size columns drop out and the action buttons wrap when the pane is narrow — which
-  is what keeps two-pane mode usable at any window width.
-
-Manrope is loaded from Google Fonts and Caslon Antique is self-hosted from `web/public/brand/`.
-If the browser cannot reach Google Fonts the UI falls back to the system sans-serif stack.
 
 ## Tech stack
 
@@ -164,6 +146,50 @@ the stack is created and cannot be changed afterwards — Portainer's own note s
 `docker-compose.yml` in git and pull from here to update the stack."* That is why
 `docker-compose.yml` is the pulling one: changing how production is deployed is a change to this
 file plus **Pull and redeploy**, with no stack surgery.
+
+#### Migrating an existing build-from-source stack
+
+> **Edit the existing stack — do not create a new one.** Portainer prefixes volume names with the
+> stack name, so a stack named `combinedstorage` owns `combinedstorage_combinedstorage-data`. Deploy
+> the same compose under a new name and Docker creates
+> `<newname>_combinedstorage-data` instead: an empty volume, and every file appears to have
+> vanished. (Nothing is deleted — the old volume is still there — but the swap is confusing to undo
+> under pressure.)
+
+`docker-compose.ghcr.yml` is otherwise byte-for-byte compatible with `docker-compose.yml`: the same
+`container_name`, the same volume, the same networks and the same environment. Only the image
+source changes, so an in-place edit keeps the data and the tunnel wiring intact.
+
+1. Back up the volume first:
+
+   ```bash
+   docker run --rm -v combinedstorage_combinedstorage-data:/data -v "$PWD":/backup \
+     busybox tar czf /backup/combinedstorage-backup.tar.gz -C /data .
+   ```
+
+2. In Portainer, open the **existing** stack → **Editor**, and replace the two build lines
+
+   ```yaml
+       build:
+         context: .
+         dockerfile: Dockerfile
+       image: combinedstorage:latest
+   ```
+
+   with
+
+   ```yaml
+       image: ghcr.io/andycqos74/combinedstorage:${IMAGE_TAG:-latest}
+       pull_policy: always
+   ```
+
+   Leave everything else — including both `networks:` blocks — exactly as it is.
+
+3. **Update the stack**, ticking *Re-pull image*.
+
+Verify the container came back on the same data (`docker exec combinedstorage ls /data`), then
+confirm the site loads through the tunnel. To roll back, paste the two build lines back: the old
+locally-built `combinedstorage:latest` image is still on the host.
 
 Two setup notes:
 
@@ -439,10 +465,10 @@ and unused ones are swept after 30 days. Disable with `IMAGE_VARIANTS_ENABLED=fa
 > Named presets (`?preset=slider`) are a natural next step on top of this — the query form above is
 > already the underlying mechanism.
 
-The file browser uses this too: switch a folder to **grid view** (the list/grid toggle in the pane
-header) to see image thumbnails instead of a list. Thumbnails are 320px square crops served from the
-same variant endpoint, so they are rendered once and cached rather than downloading full-size
-images. The choice of list or grid is remembered.
+The file browser uses this too: switch a folder to **grid view** (the ☰ / ▦ toggle) to see image
+thumbnails instead of a list. Thumbnails are 320px square crops served from the same variant
+endpoint, so they are rendered once and cached rather than downloading full-size images. The
+choice of list or grid is remembered.
 
 ## Mount as a Windows drive (WebDAV)
 
@@ -513,9 +539,7 @@ server/   Express API, storage engine, SQLite metadata
     routes/    auth · files · admin · oauth · cdn · webdav
     models/    nodes.ts · backends.ts        db/  schema · migrate
   test/      Vitest suites
-web/      React + Vite front end
-  src/       pages/ (Login · Files · Admin) · components/ · styles.css (design tokens)
-  public/brand/   wordmark logo and typeface
+web/      React + Vite front end (Login / Files / Admin)
 clients/windows/   rclone + WinFsp mount script for the Windows drive
 ```
 
