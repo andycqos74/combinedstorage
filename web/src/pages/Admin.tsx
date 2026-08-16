@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { api, errorMessage, type BackendUsage, type Usage } from '../api';
 import { formatBytes, usedPercent } from '../format';
-import { StorageMeter } from '../components/StorageMeter';
+import { backendLabel, backendPillStyle } from '../backends';
 
-export function Admin() {
+export function Admin({ onDataChange }: { onDataChange: () => void }) {
   const [backends, setBackends] = useState<BackendUsage[]>([]);
   const [usage, setUsage] = useState<Usage | null>(null);
   const [oneDriveConfigured, setOneDriveConfigured] = useState(false);
@@ -30,6 +30,11 @@ export function Admin() {
     load();
   }, [load]);
 
+  const refresh = async () => {
+    await load();
+    onDataChange();
+  };
+
   async function addLocal(e: FormEvent) {
     e.preventDefault();
     const gb = parseFloat(quotaGB);
@@ -41,7 +46,7 @@ export function Admin() {
       await api.addLocal(name.trim(), Math.round(gb * 1024 ** 3));
       setName('');
       setQuotaGB('1');
-      await load();
+      await refresh();
     } catch (err) {
       setError(errorMessage(err));
     } finally {
@@ -52,7 +57,7 @@ export function Admin() {
   async function toggle(b: BackendUsage) {
     try {
       await api.setBackendEnabled(b.id, !b.enabled);
-      await load();
+      await refresh();
     } catch (err) {
       alert(errorMessage(err));
     }
@@ -62,47 +67,98 @@ export function Admin() {
     if (!window.confirm(`Remove backend "${b.name}"?`)) return;
     try {
       await api.removeBackend(b.id);
-      await load();
+      await refresh();
     } catch (err) {
       alert(errorMessage(err));
     }
   }
 
+  const pct = usage ? usedPercent(usage.used, usage.total) : 0;
+  const enabledCount = backends.filter((b) => b.enabled).length;
+
   return (
     <div className="page">
-      {usage && <StorageMeter used={usage.used} total={usage.total} label="Total across all backends" />}
+      <div className="page-head">
+        <div>
+          <h1 className="page-title">Storage backends</h1>
+          <p className="page-sub">
+            Every enabled backend adds its capacity to one combined pool. New uploads land on
+            whichever backend has room.
+          </p>
+        </div>
+      </div>
 
-      <h2>Storage backends</h2>
       {error && <div className="error">{error}</div>}
 
-      <div className="backend-grid">
-        {backends.map((b) => (
-          <div key={b.id} className={`card backend${b.enabled ? '' : ' disabled'}`}>
-            <div className="backend-head">
-              <span className="backend-name">{b.name}</span>
-              <span className={`badge badge-${b.type}`}>{b.type}</span>
+      {usage && (
+        <div className="pool-panel">
+          <div className="head">
+            <strong>Total across all backends</strong>
+            <span>
+              {formatBytes(usage.used)} of {formatBytes(usage.total)} · {pct}%
+            </span>
+          </div>
+          <div className="pool-track">
+            <div className="fill" style={{ width: `${pct}%` }} />
+          </div>
+          <div className="pool-stats">
+            <div className="pool-stat">
+              <div className="value">
+                {enabledCount}/{backends.length}
+              </div>
+              <div className="label">Backends enabled</div>
             </div>
-            <div className="bar small">
-              <div
-                className={`bar-fill${usedPercent(b.used, b.total) >= 90 ? ' danger' : ''}`}
-                style={{ width: `${usedPercent(b.used, b.total)}%` }}
-              />
+            <div className="pool-stat">
+              <div className="value">{formatBytes(usage.used)}</div>
+              <div className="label">Used</div>
             </div>
-            <div className="muted small">
-              {formatBytes(b.used)} of {formatBytes(b.total)}
-              {b.status === 'error' && <span className="error-inline"> · connection error</span>}
+            <div className="pool-stat">
+              <div className="value">{formatBytes(usage.free)}</div>
+              <div className="label">Free</div>
             </div>
-            <div className="backend-actions">
-              <label className="switch">
-                <input type="checkbox" checked={b.enabled} onChange={() => toggle(b)} />
-                {b.enabled ? 'Enabled' : 'Disabled'}
-              </label>
-              <button className="link danger" onClick={() => remove(b)}>
-                Remove
-              </button>
+            <div className="pool-stat">
+              <div className="value">{formatBytes(usage.total)}</div>
+              <div className="label">Capacity</div>
             </div>
           </div>
-        ))}
+        </div>
+      )}
+
+      <div className="backend-grid">
+        {backends.map((b) => {
+          const bp = usedPercent(b.used, b.total);
+          return (
+            <div key={b.id} className={`card backend${b.enabled ? '' : ' disabled'}`}>
+              <div className="backend-head">
+                <span className="backend-name">{b.name}</span>
+                <span className="backend-pill" style={backendPillStyle(b.type)}>
+                  {backendLabel(b.type)}
+                </span>
+              </div>
+              <div className="bar small">
+                <div
+                  className={`bar-fill${bp >= 90 ? ' danger' : ''}`}
+                  style={{ width: `${bp}%` }}
+                />
+              </div>
+              <div className="muted small">
+                {formatBytes(b.used)} of {formatBytes(b.total)} · {bp}%
+                {b.status === 'error' && (
+                  <span className="error-inline"> · connection error</span>
+                )}
+              </div>
+              <div className="backend-actions">
+                <label className="switch">
+                  <input type="checkbox" checked={b.enabled} onChange={() => toggle(b)} />
+                  {b.enabled ? 'Enabled' : 'Disabled'}
+                </label>
+                <button className="link danger" onClick={() => remove(b)}>
+                  Remove
+                </button>
+              </div>
+            </div>
+          );
+        })}
         {backends.length === 0 && (
           <div className="muted">No storage backends yet. Add one below to start storing files.</div>
         )}
@@ -112,12 +168,16 @@ export function Admin() {
         <form className="card" onSubmit={addLocal}>
           <h3>Add local disk storage</h3>
           <p className="muted small">
-            Stores files on the server's disk. The quota is a simulated capacity so you can model
-            a fixed-size drive.
+            Stores files on the server's disk. The quota is a simulated capacity so you can model a
+            fixed-size drive.
           </p>
           <label>
             Name
-            <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Local drive A" />
+            <input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="e.g. Local drive A"
+            />
           </label>
           <label>
             Quota (GB)
@@ -137,20 +197,19 @@ export function Admin() {
         <div className="card">
           <h3>Connect a cloud backend</h3>
           <p className="muted small">
-            Connect a cloud account. Its capacity is added to the combined pool and new uploads can
-            land there automatically.
+            Its capacity joins the combined pool and new uploads can land there automatically.
           </p>
 
           <div className="cloud-connect">
             <span className="cloud-label">OneDrive</span>
             {oneDriveConfigured ? (
               <a className="button primary" href="/api/oauth/onedrive/start">
-                Connect OneDrive
+                Connect
               </a>
             ) : (
               <div className="notice">
-                Not configured. Set <code>MS_CLIENT_ID</code> / <code>MS_CLIENT_SECRET</code> in the
-                server <code>.env</code>.
+                Not configured — set <code>MS_CLIENT_ID</code> / <code>MS_CLIENT_SECRET</code> in
+                the server <code>.env</code>.
               </div>
             )}
           </div>
@@ -159,12 +218,12 @@ export function Admin() {
             <span className="cloud-label">Google Drive</span>
             {googleConfigured ? (
               <a className="button primary" href="/api/oauth/google/start">
-                Connect Google Drive
+                Connect
               </a>
             ) : (
               <div className="notice">
-                Not configured. Set <code>GOOGLE_CLIENT_ID</code> / <code>GOOGLE_CLIENT_SECRET</code>{' '}
-                in the server <code>.env</code>.
+                Not configured — set <code>GOOGLE_CLIENT_ID</code> /{' '}
+                <code>GOOGLE_CLIENT_SECRET</code> in the server <code>.env</code>.
               </div>
             )}
           </div>

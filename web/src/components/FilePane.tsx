@@ -10,7 +10,9 @@ import React, {
 import ReactDOM from 'react-dom';
 import { api, errorMessage, type ListResponse, type NodeDto } from '../api';
 import { formatBytes } from '../format';
+import { backendLabel, backendPillStyle } from '../backends';
 import { PreviewModal, isEditableImage, hasThumbnail, thumbnailUrl } from './PreviewModal';
+import { FolderIcon, FileIcon, ListIcon, GridIcon, CheckIcon } from './Icons';
 
 // The image editor pulls in a large canvas library, so it is code-split: browsing the file list
 // never downloads it, and it is fetched the first time someone opens an image for editing.
@@ -40,10 +42,6 @@ interface UploadItem {
   error?: string;
 }
 
-export interface FilePaneHandle {
-  reload: () => void;
-}
-
 export function FilePane({
   folderId,
   onNavigate,
@@ -51,9 +49,12 @@ export function FilePane({
   onSelectedChange,
   onDropNodes,
   onAfterChange,
+  onToast,
   registerReload,
+  registerUpload,
+  registerNewFolder,
+  onSummary,
   title,
-  compact,
 }: {
   folderId: string;
   onNavigate: (id: string) => void;
@@ -63,9 +64,13 @@ export function FilePane({
   onDropNodes: (payload: DragPayload, destFolderId: string, copy: boolean) => void;
   /** Called after this pane changes data (upload, new folder, rename…) so siblings refresh. */
   onAfterChange: () => void;
+  onToast?: (message: string) => void;
   registerReload?: (reload: () => void) => void;
+  /** Let the page's header buttons drive this pane's upload / new-folder actions. */
+  registerUpload?: (fn: () => void) => void;
+  registerNewFolder?: (fn: () => void) => void;
+  onSummary?: (count: number, folderName: string) => void;
   title?: string;
-  compact?: boolean;
 }) {
   const [data, setData] = useState<ListResponse | null>(null);
   const [error, setError] = useState('');
@@ -75,16 +80,16 @@ export function FilePane({
   const [preview, setPreview] = useState<NodeDto | null>(null);
   const [editing, setEditing] = useState<NodeDto | null>(null);
   // Remembered across visits; a media folder is far easier to work with as a grid.
-  const [view, setView] = useState<'list' | 'grid'>(
-    () => (localStorage.getItem('cs.view') === 'grid' ? 'grid' : 'list'),
+  const [view, setView] = useState<'list' | 'grid'>(() =>
+    localStorage.getItem('cs.view') === 'grid' ? 'grid' : 'list',
   );
+  const inputRef = useRef<HTMLInputElement>(null);
+  const lastClicked = useRef<string | null>(null);
 
   function changeView(next: 'list' | 'grid') {
     setView(next);
     localStorage.setItem('cs.view', next);
   }
-  const inputRef = useRef<HTMLInputElement>(null);
-  const lastClicked = useRef<string | null>(null);
 
   const load = useCallback(async () => {
     setError('');
@@ -104,6 +109,11 @@ export function FilePane({
   }, [registerReload, load]);
 
   const children = data?.children ?? [];
+  const crumbs = data?.breadcrumb ?? [];
+
+  useEffect(() => {
+    if (data) onSummary?.(data.children.length, crumbs[crumbs.length - 1]?.name ?? 'Home');
+  }, [data]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ---- selection ----------------------------------------------------------
 
@@ -115,7 +125,6 @@ export function FilePane({
       (e.nativeEvent as MouseEvent | undefined)?.shiftKey === true;
 
     if (shift && lastClicked.current) {
-      // Select the contiguous range between the previous click and this one.
       const ids = children.map((c) => c.id);
       const from = ids.indexOf(lastClicked.current);
       const to = ids.indexOf(node.id);
@@ -144,20 +153,17 @@ export function FilePane({
   // ---- drag and drop ------------------------------------------------------
 
   function onDragStart(e: DragEvent, node: NodeDto) {
-    // Dragging an unselected row drags just that row; otherwise drag the whole selection.
     const ids = selected.has(node.id) ? Array.from(selected) : [node.id];
     const payload: DragPayload = { ids, sourceFolderId: folderId };
     e.dataTransfer.setData(DRAG_MIME, JSON.stringify(payload));
     e.dataTransfer.effectAllowed = 'copyMove';
   }
 
-  function isInternalDrag(e: DragEvent): boolean {
-    return e.dataTransfer.types.includes(DRAG_MIME);
-  }
+  const isInternalDrag = (e: DragEvent) => e.dataTransfer.types.includes(DRAG_MIME);
 
   function onDragOverTarget(e: DragEvent, targetId: string) {
     if (!isInternalDrag(e) && e.dataTransfer.types.includes('Files')) {
-      e.preventDefault(); // external file upload
+      e.preventDefault();
       setDropTarget(targetId);
       return;
     }
@@ -175,8 +181,7 @@ export function FilePane({
     if (isInternalDrag(e)) {
       const raw = e.dataTransfer.getData(DRAG_MIME);
       if (!raw) return;
-      const payload = JSON.parse(raw) as DragPayload;
-      onDropNodes(payload, destFolderId, e.ctrlKey || e.metaKey);
+      onDropNodes(JSON.parse(raw) as DragPayload, destFolderId, e.ctrlKey || e.metaKey);
       return;
     }
     if (e.dataTransfer.files?.length) uploadFiles(e.dataTransfer.files, destFolderId);
@@ -184,38 +189,48 @@ export function FilePane({
 
   // ---- actions ------------------------------------------------------------
 
-  async function uploadFiles(fileList: FileList | File[], destFolderId = folderId) {
-    for (const file of Array.from(fileList)) {
-      const item: UploadItem = { id: crypto.randomUUID(), name: file.name, pct: 0 };
-      setUploads((prev) => [...prev, item]);
-      try {
-        await api.upload(destFolderId, file, (f) =>
+  const uploadFiles = useCallback(
+    async (fileList: FileList | File[], destFolderId = folderId) => {
+      for (const file of Array.from(fileList)) {
+        const item: UploadItem = { id: crypto.randomUUID(), name: file.name, pct: 0 };
+        setUploads((prev) => [...prev, item]);
+        try {
+          await api.upload(destFolderId, file, (f) =>
+            setUploads((prev) =>
+              prev.map((u) => (u.id === item.id ? { ...u, pct: Math.round(f * 100) } : u)),
+            ),
+          );
+          setUploads((prev) => prev.filter((u) => u.id !== item.id));
+        } catch (err) {
           setUploads((prev) =>
-            prev.map((u) => (u.id === item.id ? { ...u, pct: Math.round(f * 100) } : u)),
-          ),
-        );
-        setUploads((prev) => prev.filter((u) => u.id !== item.id));
-      } catch (err) {
-        setUploads((prev) =>
-          prev.map((u) => (u.id === item.id ? { ...u, error: errorMessage(err) } : u)),
-        );
+            prev.map((u) => (u.id === item.id ? { ...u, error: errorMessage(err) } : u)),
+          );
+        }
       }
-    }
-    await load();
-    onAfterChange();
-  }
+      await load();
+      onAfterChange();
+    },
+    [folderId, load, onAfterChange],
+  );
 
-  async function newFolder() {
+  const newFolder = useCallback(async () => {
     const name = window.prompt('New folder name:');
     if (!name) return;
     try {
       await api.createFolder(folderId, name);
       await load();
       onAfterChange();
+      onToast?.(`Created “${name}”`);
     } catch (err) {
       alert(errorMessage(err));
     }
-  }
+  }, [folderId, load, onAfterChange, onToast]);
+
+  // The page header drives this pane's Upload / New folder buttons.
+  useEffect(() => {
+    registerUpload?.(() => inputRef.current?.click());
+    registerNewFolder?.(newFolder);
+  }, [registerUpload, registerNewFolder, newFolder]);
 
   async function rename(node: NodeDto) {
     const name = window.prompt('Rename to:', node.name);
@@ -229,6 +244,7 @@ export function FilePane({
     }
   }
 
+  /** Create, change or clear a file's friendly `/f/<alias>` path. */
   async function editAlias(node: NodeDto) {
     let prefill = node.alias ?? '';
     if (!prefill) {
@@ -272,10 +288,12 @@ export function FilePane({
       <div className="toolbar">
         {title && <span className="pane-title">{title}</span>}
         <nav className="crumbs">
-          {(data?.breadcrumb ?? []).map((c, i, arr) => (
-            <span key={c.id}>
+          {crumbs.map((c, i, arr) => (
+            <span key={c.id} className="crumb-step">
               <button
-                className={`crumb${dropTarget === `crumb:${c.id}` ? ' droptarget' : ''}`}
+                className={`crumb${i === arr.length - 1 ? ' current' : ''}${
+                  dropTarget === `crumb:${c.id}` ? ' droptarget' : ''
+                }`}
                 onClick={() => onNavigate(c.id)}
                 onDragOver={(e) => onDragOverTarget(e, `crumb:${c.id}`)}
                 onDragLeave={() => setDropTarget(null)}
@@ -288,26 +306,24 @@ export function FilePane({
           ))}
         </nav>
         <div className="actions">
-          <div className="engine-switch view-switch" role="group" aria-label="View mode">
+          <div className="view-switch" role="group" aria-label="View mode">
             <button
               className={view === 'list' ? 'active' : ''}
               onClick={() => changeView('list')}
               title="List view"
+              aria-label="List view"
             >
-              ☰
+              <ListIcon />
             </button>
             <button
               className={view === 'grid' ? 'active' : ''}
               onClick={() => changeView('grid')}
               title="Grid view with thumbnails"
+              aria-label="Grid view"
             >
-              ▦
+              <GridIcon />
             </button>
           </div>
-          <button onClick={newFolder}>New folder</button>
-          <button className="primary" onClick={() => inputRef.current?.click()}>
-            Upload
-          </button>
           <input
             ref={inputRef}
             type="file"
@@ -321,19 +337,22 @@ export function FilePane({
         </div>
       </div>
 
-      {error && <div className="error">{error}</div>}
+      {error && <div className="error pane-error">{error}</div>}
 
       {uploads.length > 0 && (
-        <div className="uploads">
+        <div className="uploads inpane">
           {uploads.map((u) => (
             <div key={u.id} className="upload-row">
               <span className="name">{u.name}</span>
               {u.error ? (
                 <span className="error-inline">{u.error}</span>
               ) : (
-                <span className="progress">
-                  <span className="progress-fill" style={{ width: `${u.pct}%` }} />
-                </span>
+                <>
+                  <span className="pct">{u.pct}%</span>
+                  <span className="progress">
+                    <span className="progress-fill" style={{ width: `${u.pct}%` }} />
+                  </span>
+                </>
               )}
             </div>
           ))}
@@ -364,31 +383,34 @@ export function FilePane({
                 onDragLeave={() => dropTarget === node.id && setDropTarget(null)}
                 onDrop={(e) => node.type === 'folder' && onDropTarget(e, node.id)}
               >
-                <input
-                  type="checkbox"
-                  className="tile-check"
-                  checked={selected.has(node.id)}
-                  onChange={(e) => toggle(node, e)}
-                  onClick={(e) => e.stopPropagation()}
+                <button
+                  className={`tile-check${selected.has(node.id) ? ' on' : ''}`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    toggle(node, e);
+                  }}
                   aria-label={`Select ${node.name}`}
-                />
+                  aria-pressed={selected.has(node.id)}
+                >
+                  <CheckIcon />
+                </button>
                 <button
                   className="tile-open"
                   onClick={() => (node.type === 'folder' ? onNavigate(node.id) : setPreview(node))}
                   title={node.name}
                 >
-                  <span className="tile-thumb">
+                  <span className={`tile-thumb${node.type === 'folder' ? ' folder' : ''}`}>
                     {node.type === 'folder' ? (
-                      <span className="tile-icon">📁</span>
+                      <FolderIcon size={30} />
                     ) : hasThumbnail(node) ? (
                       <img src={thumbnailUrl(node)} alt="" loading="lazy" />
                     ) : (
-                      <span className="tile-icon">📄</span>
+                      <FileIcon size={26} />
                     )}
                   </span>
                   <span className="tile-name">{node.name}</span>
                 </button>
-                <span className="tile-meta muted">
+                <span className="tile-meta">
                   {node.type === 'file' ? formatBytes(node.size) : 'Folder'}
                 </span>
               </div>
@@ -408,7 +430,8 @@ export function FilePane({
                 </th>
                 <th>Name</th>
                 <th className="col-size">Size</th>
-                {!compact && <th className="col-actions">Actions</th>}
+                <th className="col-backend">Stored on</th>
+                <th className="col-actions">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -434,55 +457,67 @@ export function FilePane({
                       aria-label={`Select ${node.name}`}
                     />
                   </td>
-                  <td className="cell-name">
-                    <span className="icon">{node.type === 'folder' ? '📁' : '📄'}</span>
-                    <div className="name-wrap">
-                      {node.type === 'folder' ? (
-                        <button className="link name-btn" onClick={() => onNavigate(node.id)}>
+                  <td>
+                    <div className="cell-name">
+                      <span className={`file-chip${node.type === 'folder' ? ' folder' : ''}`}>
+                        {node.type === 'folder' ? <FolderIcon size={16} /> : <FileIcon size={15} />}
+                      </span>
+                      <div className="name-wrap">
+                        <button
+                          className={`name-btn${node.type === 'folder' ? ' folder' : ''}`}
+                          onClick={() =>
+                            node.type === 'folder' ? onNavigate(node.id) : setPreview(node)
+                          }
+                        >
                           {node.name}
                         </button>
-                      ) : (
-                        <button className="link name-btn" onClick={() => setPreview(node)}>
-                          {node.name}
-                        </button>
-                      )}
-                      {node.type === 'file' && node.alias && (
-                        <span className="alias-line" title={node.aliasUrl ?? ''}>
-                          🔗 /f/{node.alias}
-                        </span>
-                      )}
+                        {node.type === 'file' && node.alias && (
+                          <span className="alias-line" title={node.aliasUrl ?? ''}>
+                            /f/{node.alias}
+                          </span>
+                        )}
+                      </div>
                     </div>
                   </td>
-                  <td className="col-size muted">
-                    {node.type === 'file' ? formatBytes(node.size) : '—'}
+                  <td className="col-size">{node.type === 'file' ? formatBytes(node.size) : '—'}</td>
+                  <td className="col-backend">
+                    {node.type === 'file' && node.backendType ? (
+                      <span className="backend-pill" style={backendPillStyle(node.backendType)}>
+                        {backendLabel(node.backendType)}
+                      </span>
+                    ) : (
+                      <span className="backend-pill neutral">spread</span>
+                    )}
                   </td>
-                  {!compact && (
-                    <td className="col-actions">
-                      {node.type === 'file' && (
-                        <>
-                          {isEditableImage(node) && (
-                            <button className="link" onClick={() => setEditing(node)}>
-                              Edit
-                            </button>
-                          )}
-                          <button className="link" onClick={() => copyLink(node)}>
-                            {copied === node.id ? 'Copied!' : 'Copy link'}
+                  <td className="col-actions">
+                    {node.type === 'file' && (
+                      <>
+                        {isEditableImage(node) && (
+                          <button className="mini" onClick={() => setEditing(node)}>
+                            Edit
                           </button>
-                          <button className="link" onClick={() => editAlias(node)}>
-                            {node.alias ? 'Edit link' : 'Friendly link'}
-                          </button>
-                        </>
-                      )}
-                      <button className="link" onClick={() => rename(node)}>
-                        Rename
-                      </button>
-                    </td>
-                  )}
+                        )}
+                        <button className="mini" onClick={() => copyLink(node)}>
+                          {copied === node.id ? 'Copied!' : 'Copy link'}
+                        </button>
+                        <button className="mini" onClick={() => editAlias(node)}>
+                          {node.alias ? 'Edit link' : 'Friendly link'}
+                        </button>
+                      </>
+                    )}
+                    <button className="mini" onClick={() => rename(node)}>
+                      Rename
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
         )}
+      </div>
+
+      <div className="pane-hint">
+        Drag items onto a folder or a breadcrumb to move them — hold Ctrl to copy.
       </div>
 
       {preview && (
@@ -500,7 +535,7 @@ export function FilePane({
         <Suspense
           fallback={
             <div className="modal-backdrop">
-              <div className="modal card">
+              <div className="modal">
                 <span className="muted">Loading editor…</span>
               </div>
             </div>

@@ -2,6 +2,7 @@ import express, { Router } from 'express';
 import { config } from '../config';
 import { asyncHandler } from '../util/asyncHandler';
 import { ROOT_ID, type NodeRow } from '../models/nodes';
+import { getBackend } from '../models/backends';
 import * as files from '../services/files';
 import * as chunks from '../services/chunks';
 import { newId } from '../util/ids';
@@ -27,6 +28,8 @@ export function toDto(node: NodeRow) {
     alias: node.alias,
     aliasUrl:
       node.type === 'file' && node.alias ? `${config.publicBaseUrl}/f/${node.alias}` : null,
+    // Which backend physically holds this file, so the UI can show where it landed.
+    backendType: node.backend_id ? (getBackend(node.backend_id)?.type ?? null) : null,
     createdAt: node.created_at,
     updatedAt: node.updated_at,
   };

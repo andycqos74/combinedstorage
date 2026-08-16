@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { NodeDto } from '../api';
 import { formatBytes } from '../format';
+import { CloseIcon } from './Icons';
 
 export type PreviewKind = 'image' | 'pdf' | 'video' | 'audio' | 'text' | 'other';
 
@@ -60,6 +61,16 @@ export function thumbnailUrl(node: NodeDto, size = 320): string {
   return `${base}${sep}w=${size}&h=${size}&fit=cover&v=${v.toString(36)}`;
 }
 
+/** Short label for the pill in the preview head, so the type reads at a glance. */
+const KIND_LABEL: Record<PreviewKind, string> = {
+  image: 'Image',
+  pdf: 'PDF',
+  video: 'Video',
+  audio: 'Audio',
+  text: 'Text',
+  other: 'File',
+};
+
 export function PreviewModal({
   node,
   onClose,
@@ -107,8 +118,8 @@ export function PreviewModal({
   }, [kind, url]);
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal preview-modal card" onClick={(e) => e.stopPropagation()}>
+    <div className="modal-backdrop preview" onClick={onClose}>
+      <div className="modal preview-modal" onClick={(e) => e.stopPropagation()}>
         <div className="preview-head">
           <div className="name-wrap">
             <strong>{node.name}</strong>
@@ -117,6 +128,7 @@ export function PreviewModal({
             </span>
           </div>
           <div className="preview-head-actions">
+            <span className="kind-pill">{KIND_LABEL[kind]}</span>
             {onEdit && isEditableImage(node) && (
               <button className="primary" onClick={() => onEdit(node)}>
                 Edit image
@@ -125,8 +137,8 @@ export function PreviewModal({
             <a className="button" href={downloadUrl} download={node.name}>
               Download
             </a>
-            <button className="link" onClick={onClose}>
-              Close
+            <button className="close-btn" onClick={onClose} aria-label="Close preview">
+              <CloseIcon size={16} />
             </button>
           </div>
         </div>

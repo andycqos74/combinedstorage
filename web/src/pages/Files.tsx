@@ -3,27 +3,42 @@ import { api, errorMessage, type BulkResult, type Usage } from '../api';
 import { StorageMeter } from '../components/StorageMeter';
 import { FilePane, type DragPayload } from '../components/FilePane';
 import { FolderPicker } from '../components/FolderPicker';
+import { Toast } from '../components/Toast';
+import { UploadIcon, FolderPlusIcon } from '../components/Icons';
 
 /** Summarize a bulk result, surfacing partial failures rather than silently swallowing them. */
-function reportBulk(result: BulkResult, verb: string): void {
-  if (result.failed.length === 0) return;
+function reportBulk(result: BulkResult, verb: string): string | null {
+  if (result.failed.length === 0) {
+    return `${result.succeeded.length} item${result.succeeded.length === 1 ? '' : 's'} ${verb}`;
+  }
   const lines = result.failed.map((f) => `• ${f.name ?? f.id}: ${f.error}`).join('\n');
-  alert(
-    `${result.succeeded.length} item(s) ${verb}, ${result.failed.length} failed:\n\n${lines}`,
-  );
+  alert(`${result.succeeded.length} item(s) ${verb}, ${result.failed.length} failed:\n\n${lines}`);
+  return null;
 }
 
-export function Files() {
-  const [leftFolder, setLeftFolder] = useState('root');
+export function Files({
+  folderId,
+  onFolderChange,
+  onDataChange,
+}: {
+  folderId: string;
+  onFolderChange: (id: string) => void;
+  onDataChange: () => void;
+}) {
   const [rightFolder, setRightFolder] = useState('root');
   const [twoPane, setTwoPane] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [usage, setUsage] = useState<Usage | null>(null);
   const [busy, setBusy] = useState(false);
   const [picker, setPicker] = useState<'move' | 'copy' | null>(null);
+  const [toast, setToast] = useState('');
+  const [leftCount, setLeftCount] = useState(0);
+  const [leftName, setLeftName] = useState('Home');
 
   const reloadLeft = useRef<() => void>(() => {});
   const reloadRight = useRef<() => void>(() => {});
+  const uploadLeft = useRef<() => void>(() => {});
+  const newFolderLeft = useRef<() => void>(() => {});
 
   const refreshUsage = useCallback(async () => {
     try {
@@ -37,14 +52,16 @@ export function Files() {
     refreshUsage();
   }, [refreshUsage]);
 
-  /** Reload both panes and the storage meter after anything that changes data. */
+  /** Reload both panes, the storage meter and the shell after anything that changes data. */
   const refreshAll = useCallback(() => {
     reloadLeft.current();
     reloadRight.current();
     refreshUsage();
-  }, [refreshUsage]);
+    onDataChange();
+  }, [refreshUsage, onDataChange]);
 
   const clearSelection = () => setSelected(new Set());
+  const ids = Array.from(selected);
 
   // ---- drag and drop between folders/panes --------------------------------
 
@@ -60,7 +77,8 @@ export function Files() {
       const result = copy
         ? await api.bulkCopy(payload.ids, destFolderId)
         : await api.bulkMove(payload.ids, destFolderId);
-      reportBulk(result, copy ? 'copied' : 'moved');
+      const ok = reportBulk(result, copy ? 'copied' : 'moved');
+      if (ok) setToast(ok);
       clearSelection();
       refreshAll();
     } catch (err) {
@@ -72,18 +90,13 @@ export function Files() {
 
   // ---- bulk actions -------------------------------------------------------
 
-  const ids = Array.from(selected);
-
-  async function runBulk(
-    fn: () => Promise<BulkResult>,
-    verb: string,
-    confirmMessage?: string,
-  ) {
+  async function runBulk(fn: () => Promise<BulkResult>, verb: string, confirmMessage?: string) {
     if (ids.length === 0) return;
     if (confirmMessage && !window.confirm(confirmMessage)) return;
     setBusy(true);
     try {
-      reportBulk(await fn(), verb);
+      const ok = reportBulk(await fn(), verb);
+      if (ok) setToast(ok);
       clearSelection();
       refreshAll();
     } catch (err) {
@@ -93,24 +106,63 @@ export function Files() {
     }
   }
 
+  const backendCount = usage?.backends.length ?? 0;
+
   return (
     <div className="page">
-      {usage && <StorageMeter used={usage.used} total={usage.total} />}
-
-      <div className="pane-controls">
-        <button onClick={() => setTwoPane((v) => !v)}>
-          {twoPane ? 'Single pane' : 'Two panes'}
-        </button>
-        <span className="muted small">
-          Drag items onto a folder{twoPane ? ', a breadcrumb, or the other pane' : ' or a breadcrumb'} to
-          move them — hold Ctrl to copy.
-        </span>
+      <div className="page-head">
+        <div>
+          <h1 className="page-title">Files</h1>
+          <p className="page-sub">
+            {leftCount} item{leftCount === 1 ? '' : 's'} in {leftName}
+            {backendCount > 0 && ` · spread across ${backendCount} backend${backendCount === 1 ? '' : 's'}`}
+          </p>
+        </div>
+        <div className="page-actions">
+          <button
+            className={twoPane ? 'toggle-on' : ''}
+            onClick={() => setTwoPane((v) => !v)}
+          >
+            {twoPane ? 'Single pane' : 'Two panes'}
+          </button>
+          <button className="with-icon" onClick={() => newFolderLeft.current()}>
+            <FolderPlusIcon /> New folder
+          </button>
+          <button className="primary" onClick={() => uploadLeft.current()}>
+            <UploadIcon /> Upload
+          </button>
+        </div>
       </div>
+
+      {usage && (
+        <StorageMeter used={usage.used} total={usage.total} backends={usage.backends} />
+      )}
 
       {selected.size > 0 && (
         <div className="bulkbar">
           <span className="bulk-count">{selected.size} selected</span>
+          <span className="bulk-divider" />
+          <button disabled={busy} onClick={() => setPicker('move')}>
+            Move to…
+          </button>
+          <button disabled={busy} onClick={() => setPicker('copy')}>
+            Copy to…
+          </button>
+          <button disabled={busy} onClick={() => runBulk(() => api.bulkAlias(ids), 'linked')}>
+            Friendly links
+          </button>
+          {twoPane && (
+            <>
+              <button disabled={busy} onClick={() => runBulk(() => api.bulkMove(ids, rightFolder), 'moved')}>
+                Move →
+              </button>
+              <button disabled={busy} onClick={() => runBulk(() => api.bulkCopy(ids, rightFolder), 'copied')}>
+                Copy →
+              </button>
+            </>
+          )}
           <button
+            className="danger-btn"
             disabled={busy}
             onClick={() =>
               runBulk(
@@ -119,47 +171,9 @@ export function Files() {
                 `Delete ${selected.size} item(s)? Folders are deleted with everything inside them.`,
               )
             }
-            className="danger-btn"
           >
             Delete
           </button>
-          <button disabled={busy} onClick={() => runBulk(() => api.bulkAlias(ids), 'linked')}>
-            Friendly links
-          </button>
-          <button disabled={busy} onClick={() => setPicker('move')}>
-            Move to…
-          </button>
-          <button disabled={busy} onClick={() => setPicker('copy')}>
-            Copy to…
-          </button>
-          {twoPane && (
-            <>
-              <button
-                disabled={busy}
-                onClick={() => runBulk(() => api.bulkMove(ids, rightFolder), 'moved')}
-              >
-                Move →
-              </button>
-              <button
-                disabled={busy}
-                onClick={() => runBulk(() => api.bulkCopy(ids, rightFolder), 'copied')}
-              >
-                Copy →
-              </button>
-              <button
-                disabled={busy}
-                onClick={() => runBulk(() => api.bulkMove(ids, leftFolder), 'moved')}
-              >
-                ← Move
-              </button>
-              <button
-                disabled={busy}
-                onClick={() => runBulk(() => api.bulkCopy(ids, leftFolder), 'copied')}
-              >
-                ← Copy
-              </button>
-            </>
-          )}
           <button className="link" onClick={clearSelection}>
             Clear
           </button>
@@ -168,15 +182,21 @@ export function Files() {
 
       <div className={`panes${twoPane ? ' two' : ''}`}>
         <FilePane
-          folderId={leftFolder}
-          onNavigate={setLeftFolder}
+          folderId={folderId}
+          onNavigate={onFolderChange}
           selected={selected}
           onSelectedChange={setSelected}
           onDropNodes={handleDrop}
           onAfterChange={refreshAll}
+          onToast={setToast}
           registerReload={(fn) => (reloadLeft.current = fn)}
+          registerUpload={(fn) => (uploadLeft.current = fn)}
+          registerNewFolder={(fn) => (newFolderLeft.current = fn)}
+          onSummary={(count, name) => {
+            setLeftCount(count);
+            setLeftName(name);
+          }}
           title={twoPane ? 'Left' : undefined}
-          compact={twoPane}
         />
         {twoPane && (
           <FilePane
@@ -186,9 +206,9 @@ export function Files() {
             onSelectedChange={setSelected}
             onDropNodes={handleDrop}
             onAfterChange={refreshAll}
+            onToast={setToast}
             registerReload={(fn) => (reloadRight.current = fn)}
             title="Right"
-            compact
           />
         )}
       </div>
@@ -207,6 +227,8 @@ export function Files() {
           }}
         />
       )}
+
+      {toast && <Toast message={toast} onDone={() => setToast('')} />}
     </div>
   );
 }
