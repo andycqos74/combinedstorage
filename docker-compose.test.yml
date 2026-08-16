@@ -2,7 +2,7 @@
 #
 # Pulls a prebuilt image from GHCR; nothing is compiled on the test server.
 #
-# Differences from docker-compose.ghcr.yml (production):
+# Differences from docker-compose.yml (production):
 #   * NO external Cloudflare Tunnel network — this is reached directly on the host's LAN IP,
 #     so it starts on any Docker host without that network having to exist first.
 #   * IMAGE_TAG is required rather than defaulting to ":latest", so a test box cannot silently

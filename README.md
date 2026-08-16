@@ -107,158 +107,128 @@ switch to **Files**, and start creating folders and uploading.
 
 ## Run with Docker
 
-The image bundles the built API and web UI into one service; `docker compose` runs it with a
-persistent named volume for your data (the SQLite DB + local-backend blobs).
+The image bundles the built API and web UI into one service, with a persistent named volume for
+your data (the SQLite DB + local-backend blobs). There are three compose files:
+
+| File | Image comes from | Used for |
+| --- | --- | --- |
+| `docker-compose.yml` | GHCR, tag `${IMAGE_TAG:-latest}` | Production. Attaches to the Cloudflare Tunnel network. |
+| `docker-compose.test.yml` | GHCR, `IMAGE_TAG` required | A second server reached directly by IP — [guide](docs/deploy-test-server.md). |
+| `docker-compose.build.yml` | Built from source | Local changes, or a CPU architecture CI does not publish. |
 
 ```bash
 cp .env.example .env          # optional — override admin creds, secret, OneDrive, etc.
-docker compose up --build
+docker compose up -d          # pulls the published image
 # open http://localhost:4000
+```
+
+To run your own working copy instead:
+
+```bash
+docker compose -f docker-compose.build.yml up --build
 ```
 
 - **Data persists** in the `combinedstorage-data` volume across restarts. `docker compose down`
   stops it; add `-v` to also delete the volume (wipe all files).
-- **Override settings** from your shell or a `.env` file beside `docker-compose.yml`, e.g.
-  `ADMIN_PASSWORD=s3cret SESSION_SECRET=$(openssl rand -hex 32) docker compose up --build`.
+- **Override settings** from your shell or a `.env` file beside the compose file, e.g.
+  `ADMIN_PASSWORD=s3cret SESSION_SECRET=$(openssl rand -hex 32) docker compose up -d`.
 - **HTTP vs HTTPS**: `COOKIE_SECURE` defaults to `false` so login works over plain HTTP while
   testing. Behind an HTTPS reverse proxy, set `COOKIE_SECURE=true` and point `PUBLIC_BASE_URL`
   (and `MS_REDIRECT_URI`) at your real URL.
 - **OneDrive**: set `MS_CLIENT_ID` / `MS_CLIENT_SECRET` (see *Connecting OneDrive*) and make sure
   the Azure app's redirect URI matches `MS_REDIRECT_URI`.
 
-To build/run the image directly without compose:
+### Choosing which build runs
+
+[`.github/workflows/publish-image.yml`](.github/workflows/publish-image.yml) pushes to GitHub
+Container Registry on every push. Each branch gets **its own tag**, with slashes replaced by
+dashes, plus a `sha-<short>` tag per commit; `:latest` moves only on the repository's default
+branch, so a push to a feature branch can never change what production pulls.
 
 ```bash
-docker build -t combinedstorage .
-docker run --rm -p 4000:4000 -e COOKIE_SECURE=false -v combinedstorage-data:/data combinedstorage
+IMAGE_TAG=latest                      # default branch — the normal production choice
+IMAGE_TAG=claude-ui-redesign-luggage  # a feature branch
+IMAGE_TAG=sha-d92bf63                 # pin one exact commit
 ```
 
-### Deploying from a prebuilt image (Portainer, or any pull-based deploy)
+Set it as an environment variable on the stack, or in the `.env` beside the compose file. Unset
+means `latest`.
 
-`docker-compose.yml` **builds** the image from source, so a deploy tool that only knows how to
-*pull* (e.g. Portainer's "Re-pull image") will fail with `pull access denied for combinedstorage` —
-there is no such image in a registry.
+### Deploying with Portainer
 
-For those, use **`docker-compose.ghcr.yml`**, which pulls a prebuilt image instead.
-[`.github/workflows/publish-image.yml`](.github/workflows/publish-image.yml) builds and pushes to
-GitHub Container Registry on every push, so the server never has to compile anything.
+Point the stack at `docker-compose.yml` and use **Pull and redeploy** for every update. Because
+that file pulls rather than builds, nothing is compiled on the server.
 
-Each branch publishes **its own tag**, with slashes replaced by dashes, and `:latest` moves only on
-the repository's default branch — so a push to a feature branch can never change what production
-pulls. Select one with `IMAGE_TAG`:
+For a **Git-backed stack** (Portainer's *Repository* build method) the compose path is fixed when
+the stack is created and cannot be changed afterwards — Portainer's own note says *"Update
+`docker-compose.yml` in git and pull from here to update the stack."* That is why
+`docker-compose.yml` is the pulling one: changing how production is deployed is a change to this
+file plus **Pull and redeploy**, with no stack surgery.
 
-```bash
-IMAGE_TAG=latest docker compose -f docker-compose.ghcr.yml pull      # default branch
-IMAGE_TAG=latest docker compose -f docker-compose.ghcr.yml up -d
-```
+Two setup notes:
 
-In **Portainer**: point the stack at `docker-compose.ghcr.yml`, keep your environment variables as
-they are, and use **Pull and redeploy** for every future update.
+- **Package visibility.** New GHCR packages are private. Either make it public (GitHub → your
+  profile → Packages → the package → Package settings → Change visibility), or add a GHCR
+  credential under Portainer → Registries using a Personal Access Token with `read:packages`.
+- **CPU architecture.** The workflow builds `linux/amd64`. If your Docker host is ARM (Raspberry
+  Pi, ARM NAS), add `linux/arm64` to the `platforms:` list in the workflow, or deploy
+  `docker-compose.build.yml`.
 
-#### Migrating an existing build-from-source stack
+#### Keeping your data across the switch
 
-> **Edit the existing stack — do not create a new one.** Compose prefixes volume names with the
-> *project* name, which for a Portainer stack is the stack's name. Deploy the same compose under a
-> different name and you get `<newname>_combinedstorage-data`: an empty volume, and every file
-> appears to have vanished. (Nothing is deleted — the old volume is still there — but it is a
-> confusing thing to undo under pressure.)
->
-> Do not assume the project name matches the container name; they are often different. Read the
-> real one off the running container before changing anything:
->
-> ```bash
-> docker inspect combinedstorage \
->   --format 'project={{index .Config.Labels "com.docker.compose.project"}} volume={{range .Mounts}}{{.Name}}{{end}}'
-> ```
->
-> As long as the project name is unchanged, `docker-compose.ghcr.yml` resolves to the *same* volume
-> as `docker-compose.yml` — the data carries over with nothing extra to configure.
-
-`docker-compose.ghcr.yml` is otherwise byte-for-byte compatible with `docker-compose.yml`: the same
-`container_name`, the same volume, the same networks and the same environment. Only the image
-source changes, so an in-place edit keeps the data and the tunnel wiring intact.
-
-1. Back up the volume first:
-
-   ```bash
-   docker run --rm -v combinedstorage_combinedstorage-data:/data -v "$PWD":/backup \
-     busybox tar czf /backup/combinedstorage-backup.tar.gz -C /data .
-   ```
-
-2. In Portainer, open the **existing** stack → **Editor**, and replace the two build lines
-
-   ```yaml
-       build:
-         context: .
-         dockerfile: Dockerfile
-       image: combinedstorage:latest
-   ```
-
-   with
-
-   ```yaml
-       image: ghcr.io/andycqos74/combinedstorage:${IMAGE_TAG:-latest}
-       pull_policy: always
-   ```
-
-   Leave everything else — including both `networks:` blocks — exactly as it is.
-
-3. **Update the stack**, ticking *Re-pull image*.
-
-Verify the container came back on the same data (`docker exec combinedstorage ls /data`), then
-confirm the site loads through the tunnel. To roll back, paste the two build lines back: the old
-locally-built `combinedstorage:latest` image is still on the host.
-
-#### If the stack has no Editor tab
-
-If `workdir` above is `/data/compose/<n>`, the stack **is** Portainer's — `/data/compose` is its
-own stack directory — and the missing editor means it was deployed **from a Git repository**.
-Portainer replaces the Web editor with repository settings for those, because the repo is the
-source of truth. Nothing needs editing by hand:
-
-1. Open the stack, and in its Git settings change **Compose path** from `docker-compose.yml` to
-   `docker-compose.ghcr.yml`.
-2. Optionally add an `IMAGE_TAG` environment variable; it defaults to `latest`.
-3. **Pull and redeploy.**
-
-The stack name — and therefore the Compose project — does not change, so the existing volume is
-reused automatically.
-
-Otherwise Portainer only offers the editor for stacks it created itself, and a stack brought up
-with the `docker compose` CLI shows as *limited* / external with no editor. In that case the host
-shell works. Start by asking the running container what it is part of:
+Compose prefixes volume names with the **project** name, which for a Portainer stack is the
+stack's name — not the container name, and the two are often different. A stack named `cdnqos`
+owns `cdnqos_combinedstorage-data`. Read the real values off the running container before changing
+anything:
 
 ```bash
 docker inspect combinedstorage --format '
-container: {{.Name}}
-image    : {{.Config.Image}}
-volume   : {{range .Mounts}}{{.Name}} {{end}}
-project  : {{index .Config.Labels "com.docker.compose.project"}}
-workdir  : {{index .Config.Labels "com.docker.compose.project.working_dir"}}
-files    : {{index .Config.Labels "com.docker.compose.project.config_files"}}'
+volume : {{range .Mounts}}{{.Name}} {{end}}
+project: {{index .Config.Labels "com.docker.compose.project"}}
+workdir: {{index .Config.Labels "com.docker.compose.project.working_dir"}}'
 ```
 
-If `workdir` names a directory you can reach, edit the compose file there and redeploy with the
-**same project name** so the volume is reused:
+Every compose file here declares the same volume, container name and networks, so **while the
+project name is unchanged the data carries over with nothing extra to configure**. The way to lose
+sight of it is to deploy the same compose as a *new* stack with a different name: that creates
+`<newname>_combinedstorage-data`, an empty volume, and every file appears to have vanished. The old
+volume is still there, but it is a confusing thing to undo under pressure. Edit the existing stack
+rather than making a second one.
+
+Back the volume up first, substituting the name from the inspect above:
 
 ```bash
-cd <workdir>
+docker run --rm -v cdnqos_combinedstorage-data:/data -v "$PWD":/backup \
+  busybox tar czf /backup/combinedstorage-backup.tar.gz -C /data .
+```
+
+Afterwards, check the container came back on the same data with
+`docker exec combinedstorage ls /data`.
+
+#### Deploying without Portainer's editor
+
+A stack Portainer did not create — one brought up with the `docker compose` CLI — shows as
+*limited* / external with no editor. Redeploy it from the host shell, using the **same project
+name** so the volume is reused:
+
+```bash
+cd <workdir from the inspect above>
 docker compose -p <project> up -d
 ```
 
-If there is no usable working directory — or you would rather not depend on getting the project
-name right — pin the volume by its absolute name instead. Declaring it `external` makes the volume
-reference independent of the project name, which is what otherwise silently creates an empty one:
+If there is no usable working directory, or you would rather not depend on the project name at
+all, pin the volume by its absolute name. Declaring it `external` makes the reference independent
+of the project name, which is what otherwise silently creates an empty one:
 
 ```yaml
 volumes:
   combinedstorage-data:
-    name: combinedstorage_combinedstorage-data   # exact name from the inspect above
+    name: cdnqos_combinedstorage-data   # exact name from the inspect above
     external: true
 ```
 
-Copy `docker-compose.ghcr.yml`, replace its `volumes:` block with that, and bring it up anywhere on
-the host. The old container must be removed first, since the new one claims the same name —
+Copy `docker-compose.yml`, replace its `volumes:` block with that, and bring it up anywhere on the
+host. Remove the old container first, since the new one claims the same name —
 `docker rm -f combinedstorage` (this does **not** touch the volume; only `docker compose down -v`
 would).
 
@@ -268,34 +238,6 @@ treat the output as secret — it contains `SESSION_SECRET` and any OAuth client
 ```bash
 docker inspect combinedstorage --format '{{range .Config.Env}}{{println .}}{{end}}'
 ```
-
-Two setup notes:
-
-- **Package visibility.** New GHCR packages are private. Either make it public (GitHub → your
-  profile → Packages → the package → Package settings → Change visibility), or add a GHCR
-  credential under Portainer → Registries using a Personal Access Token with `read:packages`.
-- **CPU architecture.** The workflow builds `linux/amd64`. If your Docker host is ARM (Raspberry
-  Pi, ARM NAS), add `linux/arm64` to the `platforms:` list in the workflow.
-
-### A second server for testing a branch (LAN, no Cloudflare)
-
-Both compose files above attach to an **external** Cloudflare Tunnel network, which only exists on
-the production host — on any other machine the deploy stops with `network
-cloudflared-combinedstorage_default declared as external, but could not be found`.
-
-Use **`docker-compose.test.yml`** there instead: no external network, its own container name and
-volume, and it pulls the branch's prebuilt image rather than compiling anything. `IMAGE_TAG` is
-required — with no default, a test box cannot silently end up running production's `:latest`.
-
-```bash
-curl -O https://raw.githubusercontent.com/andycqos74/combinedstorage/<branch>/docker-compose.test.yml
-IMAGE_TAG=claude-ui-redesign-luggage PUBLIC_BASE_URL=http://192.168.1.50:4000 \
-  docker compose -f docker-compose.test.yml up -d
-```
-
-Full walkthrough, including the Portainer *Repository* method and a troubleshooting table:
-**[docs/deploy-test-server.md](docs/deploy-test-server.md)**.
-
 ### Behind a reverse proxy / Cloudflare Tunnel (HTTPS)
 
 To serve the app at a public HTTPS hostname (e.g. `https://file.example.com` via `cloudflared`):

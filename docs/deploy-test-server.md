@@ -155,10 +155,10 @@ pull there fails with `no matching manifest for linux/arm64`. Either add `linux/
 ```bash
 git clone -b claude/ui-redesign-luggage https://github.com/andycqos74/combinedstorage.git
 cd combinedstorage
-PUBLIC_BASE_URL=http://192.168.1.50:4000 docker compose up --build -d
+PUBLIC_BASE_URL=http://192.168.1.50:4000 docker compose -f docker-compose.build.yml up --build -d
 ```
 
-Note that `docker-compose.yml` attaches to the Cloudflare Tunnel network — remove both `networks:`
+Note that `docker-compose.build.yml` attaches to the Cloudflare Tunnel network — remove both `networks:`
 blocks from it first, or it will fail with the external-network error described below.
 
 ## Step 4 — The variables that matter
@@ -241,7 +241,7 @@ collide. Two things to be careful of:
 
 Three separate problems, all of which bite a fresh second host:
 
-1. **The external network.** `docker-compose.yml` and `docker-compose.ghcr.yml` both end with:
+1. **The external network.** `docker-compose.yml` and `docker-compose.build.yml` both end with:
 
    ```yaml
    networks:
@@ -261,14 +261,14 @@ Three separate problems, all of which bite a fresh second host:
    `docker-compose.test.yml` has no external network at all.
 
 2. **Both servers were pulling the same tag.** The publish workflow tagged `:latest` from the
-   default branch *and* `main`, so `docker-compose.ghcr.yml` gave prod and test identical images —
+   default branch *and* `main`, so `docker-compose.yml` gave prod and test identical images —
    pointing the test server at a branch would have had no effect. Each branch now publishes its own
    tag, and `:latest` only moves on the default branch.
 
-3. **`pull access denied for combinedstorage`.** `docker-compose.yml` builds an image named
+3. **`pull access denied for combinedstorage`.** `docker-compose.build.yml` builds an image named
    `combinedstorage:latest`, which exists only on the machine that built it — a pull-based deploy
    looks for it on Docker Hub and fails. Only the two files with a full `ghcr.io/...` image
-   reference (`docker-compose.ghcr.yml`, `docker-compose.test.yml`) can be deployed by pulling.
+   reference (`docker-compose.yml`, `docker-compose.test.yml`) can be deployed by pulling.
 
 One thing to know regardless of which option you pick: **the repository has no `main` branch.** Its
 default is `claude/multi-storage-file-system-j1pfg2`, which is what `:latest` and therefore
@@ -285,7 +285,7 @@ production's next `:latest`.
 | `authentication required` / `repository not found` cloning in Portainer | Private repo, no credentials | Enable **Authentication** with a PAT, or use the Web editor |
 | `required variable IMAGE_TAG is missing a value` | `IMAGE_TAG` not set | Set it to the branch tag — this guard is deliberate |
 | `manifest unknown` | Tag does not exist | Check the tag spelling; CI must have run on that branch at least once |
-| `pull access denied for combinedstorage` | Pull-based deploy of a build-only compose file | Use `docker-compose.test.yml`, not `docker-compose.yml` |
+| `pull access denied for combinedstorage` | Pull-based deploy of a build-only compose file | Use `docker-compose.test.yml`, not `docker-compose.build.yml` |
 | `denied` / `unauthorized` pulling from ghcr.io | Package turned private | Make it public again, or `docker login ghcr.io` with a `read:packages` token |
 | `no matching manifest for linux/arm64` | ARM host, amd64-only image | Option C, or add `linux/arm64` to `platforms:` in the workflow |
 | Container healthy, logs normal, but the site never loads from another machine | Host firewall (or the VPS provider's security group) is dropping the port | [Step 5](#step-5--open-the-port-on-the-host-firewall) — confirm first with `curl http://localhost:4000/api/health` **on the server** |

@@ -1,17 +1,25 @@
-# Combined Storage — single-service stack (the server hosts the API and the web UI).
+# Combined Storage — production stack, deployed from the prebuilt image on GitHub Container
+# Registry. This is the default compose file because that is what a Git-backed Portainer stack
+# reads: Portainer fixes the compose path at creation time, so production is updated by changing
+# THIS file and using "Pull and redeploy".
 #
-#   docker compose up --build        # build the image and start it
-#   open http://localhost:4000
+#   docker compose pull
+#   docker compose up -d
 #
-# Override any value below from your shell or a .env file next to this file, e.g.
-#   ADMIN_PASSWORD=s3cret SESSION_SECRET=$(openssl rand -hex 32) docker compose up --build
+# The image is published by .github/workflows/publish-image.yml on every push. Each branch gets
+# its own tag (slashes become dashes), and ":latest" only ever moves on the default branch:
+#
+#   IMAGE_TAG=latest                      # default branch — what production should run
+#   IMAGE_TAG=claude-ui-redesign-luggage  # a feature branch
+#   IMAGE_TAG=sha-d92bf63                 # pin an exact commit
+#
+# To build from source instead, use docker-compose.build.yml. This file attaches to the Cloudflare
+# Tunnel network; on a host without it use docker-compose.test.yml (docs/deploy-test-server.md).
 
 services:
   app:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: combinedstorage:latest
+    image: ghcr.io/andycqos74/combinedstorage:${IMAGE_TAG:-latest}
+    pull_policy: always
     container_name: combinedstorage
     ports:
       - "${PORT:-4000}:4000"
@@ -26,7 +34,6 @@ services:
       ADMIN_USERNAME: "${ADMIN_USERNAME:-admin}"
       ADMIN_PASSWORD: "${ADMIN_PASSWORD:-changeme}"
       SESSION_SECRET: "${SESSION_SECRET:-please-change-this-to-a-long-random-string}"
-      # Testing over plain HTTP, so the session cookie must not require HTTPS.
       # Set to "true" when serving over HTTPS (e.g. behind a reverse proxy).
       COOKIE_SECURE: "${COOKIE_SECURE:-false}"
       # Auto-generate a friendly link alias for every uploaded file.

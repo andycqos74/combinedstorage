@@ -17,7 +17,7 @@ data
 .gitignore
 .dockerignore
 Dockerfile
-docker-compose.yml
+docker-compose*.yml
 *.md
 .vscode
 .idea

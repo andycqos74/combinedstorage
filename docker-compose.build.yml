@@ -1,23 +1,24 @@
-# Combined Storage — deploy from the prebuilt image on GitHub Container Registry.
+# Combined Storage — build the image from source rather than pulling it.
 #
-# Use this file for Portainer / any server that should PULL the image rather than build it:
+# Use this when you have local changes to try, or on a CPU architecture the published image does
+# not cover (CI builds linux/amd64 only). Deployments pull instead — see docker-compose.yml.
 #
-#   docker compose -f docker-compose.ghcr.yml pull
-#   docker compose -f docker-compose.ghcr.yml up -d
+#   docker compose -f docker-compose.build.yml up --build
+#   open http://localhost:4000
 #
-# The image is published by .github/workflows/publish-image.yml on every push. Each branch gets
-# its own tag (slashes become dashes), and ":latest" only ever moves on the default branch:
+# The image it builds is named combinedstorage:latest and exists only on this machine, so a
+# pull-based deploy tool cannot use this file — it fails with "pull access denied".
 #
-#   IMAGE_TAG=latest                      # default branch — what production should run
-#   IMAGE_TAG=claude-ui-redesign-luggage  # a feature branch
-#
-# This file attaches to the Cloudflare Tunnel network. On a host without that network, use
-# docker-compose.test.yml instead — see docs/deploy-test-server.md.
+# Override any value below from your shell or a .env file next to this file, e.g.
+#   ADMIN_PASSWORD=s3cret SESSION_SECRET=$(openssl rand -hex 32) \
+#     docker compose -f docker-compose.build.yml up --build
 
 services:
   app:
-    image: ghcr.io/andycqos74/combinedstorage:${IMAGE_TAG:-latest}
-    pull_policy: always
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: combinedstorage:latest
     container_name: combinedstorage
     ports:
       - "${PORT:-4000}:4000"
@@ -32,6 +33,7 @@ services:
       ADMIN_USERNAME: "${ADMIN_USERNAME:-admin}"
       ADMIN_PASSWORD: "${ADMIN_PASSWORD:-changeme}"
       SESSION_SECRET: "${SESSION_SECRET:-please-change-this-to-a-long-random-string}"
+      # Testing over plain HTTP, so the session cookie must not require HTTPS.
       # Set to "true" when serving over HTTPS (e.g. behind a reverse proxy).
       COOKIE_SECURE: "${COOKIE_SECURE:-false}"
       # Auto-generate a friendly link alias for every uploaded file.
