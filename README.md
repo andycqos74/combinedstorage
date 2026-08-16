@@ -155,6 +155,50 @@ IMAGE_TAG=latest docker compose -f docker-compose.ghcr.yml up -d
 In **Portainer**: point the stack at `docker-compose.ghcr.yml`, keep your environment variables as
 they are, and use **Pull and redeploy** for every future update.
 
+#### Migrating an existing build-from-source stack
+
+> **Edit the existing stack — do not create a new one.** Portainer prefixes volume names with the
+> stack name, so a stack named `combinedstorage` owns `combinedstorage_combinedstorage-data`. Deploy
+> the same compose under a new name and Docker creates
+> `<newname>_combinedstorage-data` instead: an empty volume, and every file appears to have
+> vanished. (Nothing is deleted — the old volume is still there — but the swap is confusing to undo
+> under pressure.)
+
+`docker-compose.ghcr.yml` is otherwise byte-for-byte compatible with `docker-compose.yml`: the same
+`container_name`, the same volume, the same networks and the same environment. Only the image
+source changes, so an in-place edit keeps the data and the tunnel wiring intact.
+
+1. Back up the volume first:
+
+   ```bash
+   docker run --rm -v combinedstorage_combinedstorage-data:/data -v "$PWD":/backup \
+     busybox tar czf /backup/combinedstorage-backup.tar.gz -C /data .
+   ```
+
+2. In Portainer, open the **existing** stack → **Editor**, and replace the two build lines
+
+   ```yaml
+       build:
+         context: .
+         dockerfile: Dockerfile
+       image: combinedstorage:latest
+   ```
+
+   with
+
+   ```yaml
+       image: ghcr.io/andycqos74/combinedstorage:${IMAGE_TAG:-latest}
+       pull_policy: always
+   ```
+
+   Leave everything else — including both `networks:` blocks — exactly as it is.
+
+3. **Update the stack**, ticking *Re-pull image*.
+
+Verify the container came back on the same data (`docker exec combinedstorage ls /data`), then
+confirm the site loads through the tunnel. To roll back, paste the two build lines back: the old
+locally-built `combinedstorage:latest` image is still on the host.
+
 Two setup notes:
 
 - **Package visibility.** New GHCR packages are private. Either make it public (GitHub → your
