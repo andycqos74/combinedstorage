@@ -12,6 +12,8 @@ export interface NodeDto {
   url: string | null;
   alias: string | null;
   aliasUrl: string | null;
+  /** Backend type holding this file ('local' | 'onedrive' | 'googledrive'), null for folders. */
+  backendType: string | null;
   createdAt: string;
   updatedAt: string;
 }

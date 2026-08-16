@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { api, errorMessage } from '../api';
+import { Wordmark } from '../components/Wordmark';
 
 export function Login({ onLogin }: { onLogin: () => void }) {
   const [username, setUsername] = useState('admin');
@@ -23,25 +24,41 @@ export function Login({ onLogin }: { onLogin: () => void }) {
 
   return (
     <div className="login-wrap">
+      <div className="login-brand">
+        <Wordmark />
+      </div>
+
       <form className="card login" onSubmit={submit}>
-        <h1 className="brand-title">
-          <span className="logo">◆</span> Combined Storage
-        </h1>
-        <p className="muted">Sign in to manage your files and storage backends.</p>
-        <label>
-          Username
-          <input value={username} onChange={(e) => setUsername(e.target.value)} autoFocus />
-        </label>
-        <label>
-          Password
-          <input
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            placeholder="admin password"
-          />
-        </label>
+        <h1>Sign in</h1>
+        <p className="muted">Manage your files and storage backends.</p>
+
+        <div className="login-fields">
+          <label>
+            Username
+            <input
+              type="text"
+              name="username"
+              autoComplete="username"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              autoFocus
+            />
+          </label>
+          <label>
+            Password
+            <input
+              type="password"
+              name="password"
+              autoComplete="current-password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="admin password"
+            />
+          </label>
+        </div>
+
         {error && <div className="error">{error}</div>}
+
         <button className="primary" disabled={busy} type="submit">
           {busy ? 'Signing in…' : 'Sign in'}
         </button>

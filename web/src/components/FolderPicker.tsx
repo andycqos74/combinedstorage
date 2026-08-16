@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api, errorMessage, type Crumb, type NodeDto } from '../api';
+import { FolderIcon } from './Icons';
 
 /**
  * Modal folder browser used to pick a destination for move/copy. Only folders are listed —
@@ -53,7 +54,10 @@ export function FolderPicker({
         <nav className="crumbs">
           {breadcrumb.map((c, i, arr) => (
             <span key={c.id}>
-              <button className="crumb" onClick={() => setFolderId(c.id)}>
+              <button
+                className={`crumb${i === arr.length - 1 ? ' current' : ''}`}
+                onClick={() => setFolderId(c.id)}
+              >
                 {c.name}
               </button>
               {i < arr.length - 1 && <span className="sep">/</span>}
@@ -69,7 +73,10 @@ export function FolderPicker({
           ) : (
             folders.map((f) => (
               <button key={f.id} className="picker-row" onClick={() => setFolderId(f.id)}>
-                <span className="icon">📁</span> {f.name}
+                <span className="file-chip folder">
+                  <FolderIcon size={14} />
+                </span>
+                {f.name}
               </button>
             ))
           )}
