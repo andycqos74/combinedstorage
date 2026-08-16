@@ -152,11 +152,13 @@ the production host — on any other machine the deploy stops with `network
 cloudflared-combinedstorage_default declared as external, but could not be found`.
 
 Use **`docker-compose.test.yml`** there instead: no external network, its own container name and
-volume, and it builds from whatever branch you checked out.
+volume, and it pulls the branch's prebuilt image rather than compiling anything. `IMAGE_TAG` is
+required — with no default, a test box cannot silently end up running production's `:latest`.
 
 ```bash
-git clone -b <branch> https://github.com/andycqos74/combinedstorage.git && cd combinedstorage
-PUBLIC_BASE_URL=http://192.168.1.50:4000 docker compose -f docker-compose.test.yml up -d --build
+curl -O https://raw.githubusercontent.com/andycqos74/combinedstorage/<branch>/docker-compose.test.yml
+IMAGE_TAG=claude-ui-redesign-luggage PUBLIC_BASE_URL=http://192.168.1.50:4000 \
+  docker compose -f docker-compose.test.yml up -d
 ```
 
 Full walkthrough, including the Portainer *Repository* method and a troubleshooting table:
