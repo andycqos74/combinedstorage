@@ -38,17 +38,16 @@ built from that value.
 
 ## Step 3 — Deploy
 
-### Option A — Portainer (recommended)
+### Option A — Portainer, Web editor (recommended)
+
+Because this stack only *pulls* an image, Portainer never needs to read the repository. Using the
+Web editor avoids Git refs, private-repo tokens and their failure modes entirely — the branch you
+run is decided by `IMAGE_TAG`, not by which branch Portainer cloned.
 
 1. **Stacks → Add stack**, name it `combinedstorage-test`.
-2. Build method: **Repository**.
-3. Repository URL: `https://github.com/andycqos74/combinedstorage`
-4. Repository reference: `refs/heads/claude/ui-redesign-luggage` (the branch whose
-   `docker-compose.test.yml` you want; the image itself is chosen by `IMAGE_TAG` below)
-5. Compose path: `docker-compose.test.yml`
-6. If the repo is private, turn on **Authentication** and supply a GitHub personal access token
-   with `repo` scope as the password.
-7. Under **Environment variables**, add (see [Step 4](#step-4--the-variables-that-matter)):
+2. Build method: **Web editor**.
+3. Paste the contents of [`docker-compose.test.yml`](../docker-compose.test.yml).
+4. Under **Environment variables**, add (see [Step 4](#step-4--the-variables-that-matter)):
 
    | Name | Value |
    | --- | --- |
@@ -58,13 +57,31 @@ built from that value.
    | `SESSION_SECRET` | a long random string |
    | `COOKIE_SECURE` | `false` |
 
-8. **Deploy the stack.** It pulls roughly 110 MB and starts in well under a minute.
+5. **Deploy the stack.** It pulls roughly 110 MB and starts in well under a minute.
 
-To update later: **Pull and redeploy**, ticking *Re-pull image*. The branch tag is rewritten by CI
-on every push to that branch, so re-pulling gets the newest build.
+To update later: **Pull and redeploy**, ticking *Re-pull image*. CI rewrites the branch tag on every
+push to that branch, so re-pulling gets the newest build. To test a different branch, change
+`IMAGE_TAG` and redeploy.
 
-If you would rather not give Portainer repository access, use **Web editor** instead and paste the
-contents of `docker-compose.test.yml`; everything else is identical.
+### Option A2 — Portainer, Repository method
+
+Only needed if you want Portainer to track the compose file itself in Git. The **Repository
+reference** field wants a *full ref*, not a bare branch name:
+
+```
+refs/heads/claude/ui-redesign-luggage
+```
+
+Entering `claude/ui-redesign-luggage` fails with:
+
+```
+Unable to fetch git repository id: could not find ref "claude/ui-redesign-luggage" in the repository
+```
+
+Set Repository URL to `https://github.com/andycqos74/combinedstorage`, compose path to
+`docker-compose.test.yml`, and — if the repo is private — turn on **Authentication** with a GitHub
+personal access token (classic: `repo` scope; fine-grained: *Contents: Read*) as the password. Then
+add the same environment variables as Option A.
 
 ### Option B — Shell
 
@@ -193,6 +210,8 @@ production's next `:latest`.
 | Symptom | Cause | Fix |
 | --- | --- | --- |
 | `network ... declared as external, but could not be found` | Used a production compose file | Use `docker-compose.test.yml` |
+| `could not find ref "claude/..." in the repository` | Portainer's *Repository reference* needs a full ref | Use `refs/heads/claude/...`, or switch to the Web editor (Option A) |
+| `authentication required` / `repository not found` cloning in Portainer | Private repo, no credentials | Enable **Authentication** with a PAT, or use the Web editor |
 | `required variable IMAGE_TAG is missing a value` | `IMAGE_TAG` not set | Set it to the branch tag — this guard is deliberate |
 | `manifest unknown` | Tag does not exist | Check the tag spelling; CI must have run on that branch at least once |
 | `pull access denied for combinedstorage` | Pull-based deploy of a build-only compose file | Use `docker-compose.test.yml`, not `docker-compose.yml` |
