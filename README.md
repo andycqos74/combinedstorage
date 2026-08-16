@@ -140,13 +140,16 @@ docker run --rm -p 4000:4000 -e COOKIE_SECURE=false -v combinedstorage-data:/dat
 there is no such image in a registry.
 
 For those, use **`docker-compose.ghcr.yml`**, which pulls a prebuilt image instead.
-[`.github/workflows/publish-image.yml`](.github/workflows/publish-image.yml) builds and pushes
-`ghcr.io/<owner>/combinedstorage:latest` to GitHub Container Registry on every push, so the server
-never has to compile anything.
+[`.github/workflows/publish-image.yml`](.github/workflows/publish-image.yml) builds and pushes to
+GitHub Container Registry on every push, so the server never has to compile anything.
+
+Each branch publishes **its own tag**, with slashes replaced by dashes, and `:latest` moves only on
+the repository's default branch — so a push to a feature branch can never change what production
+pulls. Select one with `IMAGE_TAG`:
 
 ```bash
-docker compose -f docker-compose.ghcr.yml pull
-docker compose -f docker-compose.ghcr.yml up -d
+IMAGE_TAG=latest docker compose -f docker-compose.ghcr.yml pull      # default branch
+IMAGE_TAG=latest docker compose -f docker-compose.ghcr.yml up -d
 ```
 
 In **Portainer**: point the stack at `docker-compose.ghcr.yml`, keep your environment variables as
@@ -159,6 +162,23 @@ Two setup notes:
   credential under Portainer → Registries using a Personal Access Token with `read:packages`.
 - **CPU architecture.** The workflow builds `linux/amd64`. If your Docker host is ARM (Raspberry
   Pi, ARM NAS), add `linux/arm64` to the `platforms:` list in the workflow.
+
+### A second server for testing a branch (LAN, no Cloudflare)
+
+Both compose files above attach to an **external** Cloudflare Tunnel network, which only exists on
+the production host — on any other machine the deploy stops with `network
+cloudflared-combinedstorage_default declared as external, but could not be found`.
+
+Use **`docker-compose.test.yml`** there instead: no external network, its own container name and
+volume, and it builds from whatever branch you checked out.
+
+```bash
+git clone -b <branch> https://github.com/andycqos74/combinedstorage.git && cd combinedstorage
+PUBLIC_BASE_URL=http://192.168.1.50:4000 docker compose -f docker-compose.test.yml up -d --build
+```
+
+Full walkthrough, including the Portainer *Repository* method and a troubleshooting table:
+**[docs/deploy-test-server.md](docs/deploy-test-server.md)**.
 
 ### Behind a reverse proxy / Cloudflare Tunnel (HTTPS)
 

@@ -2,12 +2,19 @@ name: Publish container image
 
 # Builds the app image and pushes it to GitHub Container Registry so deployment targets
 # (e.g. Portainer) can simply pull it instead of building from source on the server.
+#
+# Every branch gets its OWN tag, derived from the branch name with "/" replaced by "-":
+#
+#   claude/ui-redesign-luggage  ->  ghcr.io/<owner>/combinedstorage:claude-ui-redesign-luggage
+#
+# ":latest" is published only from the repository's default branch, so a push to a feature
+# branch can never move the tag a production deployment is pulling.
 
 on:
   push:
     branches:
-      - claude/multi-storage-file-system-j1pfg2
       - main
+      - 'claude/**'
   workflow_dispatch:
 
 jobs:
@@ -36,6 +43,17 @@ jobs:
         id: image
         run: echo "name=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
 
+      # Produces the branch tag, a short-SHA tag, and ":latest" on the default branch only.
+      - name: Compute tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ steps.image.outputs.name }}
+          tags: |
+            type=ref,event=branch
+            type=sha,format=short
+            type=raw,value=latest,enable={{is_default_branch}}
+
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
@@ -43,14 +61,18 @@ jobs:
           # Add linux/arm64 here if your Docker host is ARM (e.g. a Raspberry Pi or ARM NAS).
           platforms: linux/amd64
           push: true
-          tags: |
-            ${{ steps.image.outputs.name }}:latest
-            ${{ steps.image.outputs.name }}:${{ github.sha }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
       - name: Summary
         run: |
-          echo "Pushed \`${{ steps.image.outputs.name }}:latest\`" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "Deploy with \`docker-compose.ghcr.yml\` (Portainer: Pull and redeploy)." >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo "Pushed:"
+            echo '```'
+            echo "${{ steps.meta.outputs.tags }}"
+            echo '```'
+            echo "Deploy with \`docker-compose.ghcr.yml\` (Portainer: Pull and redeploy),"
+            echo "setting \`IMAGE_TAG\` to the tag you want that server to run."
+          } >> "$GITHUB_STEP_SUMMARY"

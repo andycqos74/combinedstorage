@@ -5,12 +5,18 @@
 #   docker compose -f docker-compose.ghcr.yml pull
 #   docker compose -f docker-compose.ghcr.yml up -d
 #
-# The image is published by .github/workflows/publish-image.yml on every push.
-# Use the sibling docker-compose.yml instead when you want to build from source locally.
+# The image is published by .github/workflows/publish-image.yml on every push. Each branch gets
+# its own tag (slashes become dashes), and ":latest" only ever moves on the default branch:
+#
+#   IMAGE_TAG=latest                      # default branch — what production should run
+#   IMAGE_TAG=claude-ui-redesign-luggage  # a feature branch
+#
+# This file attaches to the Cloudflare Tunnel network. On a host without that network, use
+# docker-compose.test.yml instead — see docs/deploy-test-server.md.
 
 services:
   app:
-    image: ghcr.io/andycqos74/combinedstorage:latest
+    image: ghcr.io/andycqos74/combinedstorage:${IMAGE_TAG:-latest}
     pull_policy: always
     container_name: combinedstorage
     ports:
