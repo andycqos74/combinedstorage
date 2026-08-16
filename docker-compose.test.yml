@@ -1,0 +1,71 @@
+# Combined Storage — test/staging stack.
+#
+# Differences from docker-compose.yml (production):
+#   * NO external Cloudflare Tunnel network — this is reached directly on the host's LAN IP,
+#     so it starts on any Docker host without that network having to exist first.
+#   * Builds from the checked-out source, so it runs exactly the branch you deployed.
+#   * Its own container name and volume, so it can never disturb a production stack.
+#
+# Deploy with Portainer -> Stacks -> Add stack -> Repository (point at this repo + the branch
+# you want to test, compose path "docker-compose.test.yml"), or from a shell:
+#
+#   git clone -b <branch> https://github.com/andycqos74/combinedstorage.git
+#   cd combinedstorage
+#   PUBLIC_BASE_URL=http://192.168.1.50:4000 docker compose -f docker-compose.test.yml up -d --build
+#
+# PUBLIC_BASE_URL must be the address you type in the browser, including the port. File links,
+# thumbnails and previews are all built from it, so if it is wrong the UI loads but images break.
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: combinedstorage-test:latest
+    container_name: combinedstorage-test
+    ports:
+      - "${PORT:-4000}:4000"
+    environment:
+      PORT: "4000"
+      DATA_DIR: "/data"
+      # The URL you reach this server on, e.g. http://192.168.1.50:4000 — no trailing slash.
+      # Leaving this at localhost makes every file link point at the viewer's own machine.
+      PUBLIC_BASE_URL: "${PUBLIC_BASE_URL:-http://localhost:4000}"
+      ADMIN_USERNAME: "${ADMIN_USERNAME:-admin}"
+      ADMIN_PASSWORD: "${ADMIN_PASSWORD:-changeme}"
+      SESSION_SECRET: "${SESSION_SECRET:-please-change-this-to-a-long-random-string}"
+      # Plain HTTP on a LAN: the session cookie must NOT require HTTPS or sign-in will fail
+      # with no visible error (the browser silently drops the cookie).
+      COOKIE_SECURE: "${COOKIE_SECURE:-false}"
+      AUTO_ALIAS_ON_UPLOAD: "${AUTO_ALIAS_ON_UPLOAD:-false}"
+      # No Cloudflare in front, so large uploads are not capped at 100 MB here.
+      UPLOAD_CHUNK_MB: "${UPLOAD_CHUNK_MB:-32}"
+      # ---- Image conversion (off by default: converting replaces the stored file) ----
+      IMAGE_CONVERT_ON_UPLOAD: "${IMAGE_CONVERT_ON_UPLOAD:-false}"
+      IMAGE_MAX_DIMENSION: "${IMAGE_MAX_DIMENSION:-2560}"
+      IMAGE_FORMAT: "${IMAGE_FORMAT:-webp}"
+      IMAGE_QUALITY: "${IMAGE_QUALITY:-82}"
+      IMAGE_MAX_CONVERT_MB: "${IMAGE_MAX_CONVERT_MB:-50}"
+      IMAGE_CONVERT_ON_DRIVE: "${IMAGE_CONVERT_ON_DRIVE:-true}"
+      IMAGE_VARIANTS_ENABLED: "${IMAGE_VARIANTS_ENABLED:-true}"
+      # Windows drive (WebDAV /dav). Credentials default to the admin login above.
+      DAV_ENABLED: "${DAV_ENABLED:-true}"
+      DAV_USERNAME: "${DAV_USERNAME:-}"
+      DAV_PASSWORD: "${DAV_PASSWORD:-}"
+      # ---- OneDrive / Google Drive (optional) ----
+      # OAuth callbacks are derived from PUBLIC_BASE_URL. Providers reject plain-http LAN
+      # addresses as redirect URIs, so cloud backends generally cannot be connected on this
+      # stack — use local-disk backends to test, or point PUBLIC_BASE_URL at a real hostname.
+      MS_CLIENT_ID: "${MS_CLIENT_ID:-}"
+      MS_CLIENT_SECRET: "${MS_CLIENT_SECRET:-}"
+      MS_TENANT: "${MS_TENANT:-common}"
+      MS_REDIRECT_URI: "${MS_REDIRECT_URI:-}"
+      GOOGLE_CLIENT_ID: "${GOOGLE_CLIENT_ID:-}"
+      GOOGLE_CLIENT_SECRET: "${GOOGLE_CLIENT_SECRET:-}"
+      GOOGLE_REDIRECT_URI: "${GOOGLE_REDIRECT_URI:-}"
+    volumes:
+      - combinedstorage-test-data:/data
+    restart: unless-stopped
+
+volumes:
+  combinedstorage-test-data:
