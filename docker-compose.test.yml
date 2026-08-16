@@ -1,27 +1,34 @@
 # Combined Storage — test/staging stack.
 #
-# Differences from docker-compose.yml (production):
+# Pulls a prebuilt image from GHCR; nothing is compiled on the test server.
+#
+# Differences from docker-compose.ghcr.yml (production):
 #   * NO external Cloudflare Tunnel network — this is reached directly on the host's LAN IP,
 #     so it starts on any Docker host without that network having to exist first.
-#   * Builds from the checked-out source, so it runs exactly the branch you deployed.
+#   * IMAGE_TAG is required rather than defaulting to ":latest", so a test box cannot silently
+#     end up running the same image as production.
 #   * Its own container name and volume, so it can never disturb a production stack.
 #
-# Deploy with Portainer -> Stacks -> Add stack -> Repository (point at this repo + the branch
-# you want to test, compose path "docker-compose.test.yml"), or from a shell:
+# Pick the tag for the branch you want to test — the publish workflow tags every branch with its
+# name, slashes replaced by dashes:
 #
-#   git clone -b <branch> https://github.com/andycqos74/combinedstorage.git
-#   cd combinedstorage
-#   PUBLIC_BASE_URL=http://192.168.1.50:4000 docker compose -f docker-compose.test.yml up -d --build
+#   IMAGE_TAG=claude-ui-redesign-luggage               # the Luggage interface
+#   IMAGE_TAG=claude-multi-storage-file-system-j1pfg2  # the default branch (same build as :latest)
+#
+# Deploy with Portainer -> Stacks -> Add stack (compose path "docker-compose.test.yml"), or:
+#
+#   IMAGE_TAG=claude-ui-redesign-luggage \
+#   PUBLIC_BASE_URL=http://192.168.1.50:4000 \
+#     docker compose -f docker-compose.test.yml up -d
 #
 # PUBLIC_BASE_URL must be the address you type in the browser, including the port. File links,
 # thumbnails and previews are all built from it, so if it is wrong the UI loads but images break.
 
 services:
   app:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: combinedstorage-test:latest
+    image: ghcr.io/andycqos74/combinedstorage:${IMAGE_TAG:?set IMAGE_TAG to the branch tag to test, e.g. claude-ui-redesign-luggage}
+    # Always re-fetch, so "redeploy" picks up a new build of the same branch tag.
+    pull_policy: always
     container_name: combinedstorage-test
     ports:
       - "${PORT:-4000}:4000"
