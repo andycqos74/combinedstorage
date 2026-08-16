@@ -63,6 +63,41 @@ To update later: **Pull and redeploy**, ticking *Re-pull image*. CI rewrites the
 push to that branch, so re-pulling gets the newest build. To test a different branch, change
 `IMAGE_TAG` and redeploy.
 
+#### If Portainer rejects the file
+
+Older Portainer/Compose versions reject `pull_policy:` (`Additional property pull_policy is not
+allowed`) or the `${VAR:?message}` required-variable syntax. This version uses neither — paste it as
+is and edit the two marked lines. It needs no environment variables at all.
+
+```yaml
+services:
+  app:
+    # The branch to test. Change the tag to switch branches.
+    image: ghcr.io/andycqos74/combinedstorage:claude-ui-redesign-luggage
+    container_name: combinedstorage-test
+    ports:
+      - "4000:4000"
+    environment:
+      PORT: "4000"
+      DATA_DIR: "/data"
+      # EDIT: this server's LAN IP, with the port, no trailing slash.
+      PUBLIC_BASE_URL: "http://192.168.1.50:4000"
+      ADMIN_USERNAME: "admin"
+      # EDIT: anything but the default.
+      ADMIN_PASSWORD: "changeme-please"
+      SESSION_SECRET: "replace-with-32-plus-random-characters"
+      COOKIE_SECURE: "false"
+    volumes:
+      - combinedstorage-test-data:/data
+    restart: unless-stopped
+
+volumes:
+  combinedstorage-test-data:
+```
+
+Everything omitted here falls back to the server's own defaults, which suit LAN testing. To pick up
+a newer build of the same tag later, tick *Re-pull image* when redeploying.
+
 ### Option A2 — Portainer, Repository method
 
 Only needed if you want Portainer to track the compose file itself in Git. The **Repository
