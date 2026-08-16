@@ -1,7 +1,10 @@
 # Deploying a test stack on a second Docker server
 
-Goal: run a **branch** of this repo on a separate Docker host, reachable on the LAN by IP, while
-the existing server keeps running production. No Cloudflare, no DNS, no TLS.
+Goal: run a **branch** of this repo on a separate Docker host, reached directly by IP, while the
+existing server keeps running production. No Cloudflare, no DNS, no TLS.
+
+The examples use a LAN address. If the host is a public VPS the steps are the same, but read the
+warning in [Step 5](#step-5--open-the-port-on-the-host-firewall) before opening the port.
 
 Use **`docker-compose.test.yml`** for this. It pulls a prebuilt image from GHCR — nothing is
 compiled on the test server — and unlike the production compose files it does not require the
@@ -24,12 +27,13 @@ The package is **public**, so the test server does not need to log in to GHCR.
 `IMAGE_TAG` has no default: leaving it unset stops the deploy with an explicit error rather than
 quietly starting production's image on your test box.
 
-## Step 2 — Find the test server's LAN IP
+## Step 2 — Find the address you will reach it on
 
 On the test server:
 
 ```bash
-hostname -I | awk '{print $1}'      # e.g. 192.168.1.50
+hostname -I | awk '{print $1}'      # LAN address, e.g. 192.168.1.50
+curl -s ifconfig.me                 # on a VPS, its public address
 ```
 
 Write it down. It goes into `PUBLIC_BASE_URL`, and getting it wrong is the single most common
@@ -172,7 +176,39 @@ Defaults for everything else are in `docker-compose.test.yml`; these five decide
 If port 4000 is taken on that host, add `PORT=4100` and use `http://<LAN-IP>:4100` for
 `PUBLIC_BASE_URL` — the two must agree.
 
-## Step 5 — Verify
+## Step 5 — Open the port on the host firewall
+
+Publishing a port in Compose only tells Docker to listen; a host firewall in front of it still
+drops the traffic. The symptom is confusing, because everything downstream looks healthy: the
+container runs, the logs say `Combined Storage server listening on http://localhost:4000`, and
+`curl` **on the server itself** succeeds. Only connections from other machines fail.
+
+```bash
+# on the server: proves the app is up regardless of the firewall
+curl -s http://localhost:4000/api/health          # -> {"ok":true}
+
+# ufw (Debian/Ubuntu)
+sudo ufw allow 4000/tcp
+# firewalld (RHEL/Fedora/Alma)
+sudo firewall-cmd --add-port=4000/tcp --permanent && sudo firewall-cmd --reload
+```
+
+On a cloud VPS there is usually a **second** firewall in the provider's console — a security group
+or network ACL — that has to allow the port as well.
+
+> **If the host is a public VPS, that port is now open to the internet.** Everything on it is
+> reachable by anyone: the admin UI, and `/dav` on HTTP Basic auth. Over plain HTTP the password
+> also crosses the network in the clear. At minimum set a real `ADMIN_PASSWORD`, and prefer scoping
+> the firewall rule to your own address rather than opening it to the world:
+>
+> ```bash
+> sudo ufw allow from <your.ip.address> to any port 4000 proto tcp
+> ```
+>
+> Set `DAV_ENABLED=false` if you are not testing the Windows drive. For anything longer-lived, put
+> it behind the tunnel or a TLS reverse proxy and set `COOKIE_SECURE=true`.
+
+## Step 6 — Verify
 
 ```bash
 curl -s http://192.168.1.50:4000/api/health        # -> {"ok":true}
@@ -188,7 +224,7 @@ Then in a browser on another machine (not the server itself — that is what cat
 4. Switch to grid view. If the thumbnail renders, `PUBLIC_BASE_URL` is right.
 5. **Copy link** on the file and open it in a new tab. It should serve the image.
 
-## Step 6 — Keep prod and test apart
+## Step 7 — Keep prod and test apart
 
 They are already isolated: different hosts, and the test stack uses its own container name
 (`combinedstorage-test`) and volume (`combinedstorage-test-data`), so even on one host they cannot
@@ -252,6 +288,7 @@ production's next `:latest`.
 | `pull access denied for combinedstorage` | Pull-based deploy of a build-only compose file | Use `docker-compose.test.yml`, not `docker-compose.yml` |
 | `denied` / `unauthorized` pulling from ghcr.io | Package turned private | Make it public again, or `docker login ghcr.io` with a `read:packages` token |
 | `no matching manifest for linux/arm64` | ARM host, amd64-only image | Option C, or add `linux/arm64` to `platforms:` in the workflow |
+| Container healthy, logs normal, but the site never loads from another machine | Host firewall (or the VPS provider's security group) is dropping the port | [Step 5](#step-5--open-the-port-on-the-host-firewall) — confirm first with `curl http://localhost:4000/api/health` **on the server** |
 | Sign-in does nothing, no error | `COOKIE_SECURE=true` over plain HTTP | Set `COOKIE_SECURE=false` |
 | UI loads, images and thumbnails broken | `PUBLIC_BASE_URL` wrong or still `localhost` | Set it to `http://<LAN-IP>:<PORT>` and redeploy |
 | Redeploy runs the old build | Image not re-pulled | Tick *Re-pull image*, or `docker compose -f docker-compose.test.yml pull` first |
