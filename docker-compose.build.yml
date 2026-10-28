@@ -29,9 +29,12 @@ services:
       # HTTPS URL (e.g. https://file.amcmail.co.uk); CDN links and the OAuth callback URLs
       # are built from it.
       PUBLIC_BASE_URL: "${PUBLIC_BASE_URL:-http://localhost:4000}"
-      # Admin login — CHANGE THESE for anything beyond local testing.
+      # First admin account (created only when the database has no users yet) — CHANGE THESE
+      # for anything beyond local testing. Later password changes happen in the app.
       ADMIN_USERNAME: "${ADMIN_USERNAME:-admin}"
       ADMIN_PASSWORD: "${ADMIN_PASSWORD:-changeme}"
+      # Let anyone create an account from the sign-in page (otherwise admins create accounts).
+      ALLOW_SIGNUP: "${ALLOW_SIGNUP:-false}"
       SESSION_SECRET: "${SESSION_SECRET:-please-change-this-to-a-long-random-string}"
       # Testing over plain HTTP, so the session cookie must not require HTTPS.
       # Set to "true" when serving over HTTPS (e.g. behind a reverse proxy).
@@ -49,7 +52,8 @@ services:
       IMAGE_MAX_CONVERT_MB: "${IMAGE_MAX_CONVERT_MB:-50}"
       IMAGE_CONVERT_ON_DRIVE: "${IMAGE_CONVERT_ON_DRIVE:-true}"
       IMAGE_VARIANTS_ENABLED: "${IMAGE_VARIANTS_ENABLED:-true}"
-      # Windows drive (WebDAV /dav). Credentials default to the admin login above.
+      # Windows drive (WebDAV /dav). Each user signs in with their own account; DAV_USERNAME /
+      # DAV_PASSWORD are an optional extra login for the first admin.
       DAV_ENABLED: "${DAV_ENABLED:-true}"
       DAV_USERNAME: "${DAV_USERNAME:-}"
       DAV_PASSWORD: "${DAV_PASSWORD:-}"

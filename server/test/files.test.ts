@@ -6,11 +6,11 @@ import { migrate, ROOT_ID } from '../src/db/migrate';
 import * as files from '../src/services/files';
 import { getNode, childByName } from '../src/models/nodes';
 import { getBackend, backendConfig } from '../src/models/backends';
-import { resetDb, makeLocalBackend } from './helpers';
+import { resetDb, makeLocalBackend, adminId } from './helpers';
 
 function upload(parentId: string, name: string, content: string) {
   const buf = Buffer.from(content);
-  return files.uploadFile({
+  return files.uploadFile(adminId(), {
     parentId,
     name,
     stream: Readable.from(buf),
@@ -27,19 +27,19 @@ describe('files service', () => {
   });
 
   it('creates folders with correct nested paths', () => {
-    const docs = files.createFolder(ROOT_ID, 'docs');
+    const docs = files.createFolder(adminId(), ROOT_ID, 'docs');
     expect(docs.path).toBe('/docs');
-    const sub = files.createFolder(docs.id, 'reports');
+    const sub = files.createFolder(adminId(), docs.id, 'reports');
     expect(sub.path).toBe('/docs/reports');
   });
 
   it('rejects duplicate names in the same folder', () => {
-    files.createFolder(ROOT_ID, 'docs');
-    expect(() => files.createFolder(ROOT_ID, 'docs')).toThrow();
+    files.createFolder(adminId(), ROOT_ID, 'docs');
+    expect(() => files.createFolder(adminId(), ROOT_ID, 'docs')).toThrow();
   });
 
   it('rejects names containing slashes', () => {
-    expect(() => files.createFolder(ROOT_ID, 'a/b')).toThrow();
+    expect(() => files.createFolder(adminId(), ROOT_ID, 'a/b')).toThrow();
   });
 
   it('uploads a file with a size, mime, backend and public token', async () => {
@@ -54,7 +54,7 @@ describe('files service', () => {
 
   it('rename is metadata-only: token and object key are unchanged', async () => {
     const node = await upload(ROOT_ID, 'a.txt', 'content');
-    const renamed = files.rename(node.id, 'b.txt');
+    const renamed = files.rename(adminId(), node.id, 'b.txt');
     expect(renamed.name).toBe('b.txt');
     expect(renamed.path).toBe('/b.txt');
     expect(renamed.public_token).toBe(node.public_token);
@@ -63,25 +63,25 @@ describe('files service', () => {
   });
 
   it('renaming a folder repaths its whole subtree', async () => {
-    const docs = files.createFolder(ROOT_ID, 'docs');
-    const sub = files.createFolder(docs.id, 'sub');
+    const docs = files.createFolder(adminId(), ROOT_ID, 'docs');
+    const sub = files.createFolder(adminId(), docs.id, 'sub');
     await upload(sub.id, 'f.txt', 'x');
-    files.rename(docs.id, 'papers');
+    files.rename(adminId(), docs.id, 'papers');
     expect(getNode(sub.id)!.path).toBe('/papers/sub');
     expect(childByName(sub.id, 'f.txt')!.path).toBe('/papers/sub/f.txt');
   });
 
   it('moves a node into another folder and repaths', async () => {
-    const docs = files.createFolder(ROOT_ID, 'docs');
+    const docs = files.createFolder(adminId(), ROOT_ID, 'docs');
     const node = await upload(ROOT_ID, 'move-me.txt', 'x');
-    files.move(node.id, docs.id);
+    files.move(adminId(), node.id, docs.id);
     expect(getNode(node.id)!.path).toBe('/docs/move-me.txt');
   });
 
   it('prevents moving a folder into its own subtree', () => {
-    const a = files.createFolder(ROOT_ID, 'a');
-    const b = files.createFolder(a.id, 'b');
-    expect(() => files.move(a.id, b.id)).toThrow();
+    const a = files.createFolder(adminId(), ROOT_ID, 'a');
+    const b = files.createFolder(adminId(), a.id, 'b');
+    expect(() => files.move(adminId(), a.id, b.id)).toThrow();
   });
 
   it('deletes a file and removes its bytes from the backend', async () => {
@@ -91,17 +91,17 @@ describe('files service', () => {
     const blob = path.join(root, node.object_key!);
     expect(fs.existsSync(blob)).toBe(true);
 
-    await files.remove(node.id);
+    await files.remove(adminId(), node.id);
     expect(getNode(node.id)).toBeUndefined();
     expect(files.fileByToken(node.public_token!)).toBeUndefined();
     expect(fs.existsSync(blob)).toBe(false);
   });
 
   it('deletes a folder subtree recursively', async () => {
-    const docs = files.createFolder(ROOT_ID, 'docs');
-    const sub = files.createFolder(docs.id, 'sub');
+    const docs = files.createFolder(adminId(), ROOT_ID, 'docs');
+    const sub = files.createFolder(adminId(), docs.id, 'sub');
     const f = await upload(sub.id, 'f.txt', 'x');
-    await files.remove(docs.id);
+    await files.remove(adminId(), docs.id);
     expect(getNode(docs.id)).toBeUndefined();
     expect(getNode(sub.id)).toBeUndefined();
     expect(getNode(f.id)).toBeUndefined();
@@ -109,13 +109,13 @@ describe('files service', () => {
 
   it('replaceFileContent swaps the bytes but keeps id, token and alias', async () => {
     const node = await upload(ROOT_ID, 'photo.png', 'original');
-    files.setAlias(node.id, 'my-photo');
+    files.setAlias(adminId(), node.id, 'my-photo');
     const oldBackend = getBackend(node.backend_id!)!;
     const { root } = backendConfig<{ root: string }>(oldBackend);
     const oldBlob = path.join(root, node.object_key!);
 
     const edited = Buffer.from('edited-content-longer');
-    const updated = await files.replaceFileContent({
+    const updated = await files.replaceFileContent(adminId(), {
       id: node.id,
       stream: Readable.from(edited),
       size: edited.length,
@@ -141,7 +141,7 @@ describe('files service', () => {
     // updated_at has second-or-better resolution; make sure the timestamp really moves.
     await new Promise((r) => setTimeout(r, 1100));
     const body = Buffer.from('after-edit');
-    const updated = await files.replaceFileContent({
+    const updated = await files.replaceFileContent(adminId(), {
       id: node.id,
       stream: Readable.from(body),
       size: body.length,

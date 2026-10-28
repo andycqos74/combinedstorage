@@ -5,7 +5,7 @@ import type { AddressInfo } from 'node:net';
 import { app } from '../src/app';
 import * as files from '../src/services/files';
 import { ROOT_ID, getNode, childByName, listChildren } from '../src/models/nodes';
-import { resetDb, makeLocalBackend } from './helpers';
+import { resetDb, makeLocalBackend, adminId } from './helpers';
 
 let server: http.Server;
 let port: number;
@@ -29,7 +29,13 @@ function call(method: string, path: string, body?: unknown): Promise<{ status: n
 
 function upload(parentId: string, name: string, content = 'x') {
   const buf = Buffer.from(content);
-  return files.uploadFile({ parentId, name, stream: Readable.from(buf), size: buf.length, mimeType: 'text/plain' });
+  return files.uploadFile(adminId(), {
+    parentId,
+    name,
+    stream: Readable.from(buf),
+    size: buf.length,
+    mimeType: 'text/plain',
+  });
 }
 
 beforeAll(async () => {
@@ -58,7 +64,7 @@ beforeEach(() => {
 
 describe('bulk operations API', () => {
   it('moves several items into a folder', async () => {
-    const dest = files.createFolder(ROOT_ID, 'dest');
+    const dest = files.createFolder(adminId(), ROOT_ID, 'dest');
     const a = await upload(ROOT_ID, 'a.txt');
     const b = await upload(ROOT_ID, 'b.txt');
 
@@ -70,7 +76,7 @@ describe('bulk operations API', () => {
   });
 
   it('reports per-item failures without aborting the rest', async () => {
-    const dest = files.createFolder(ROOT_ID, 'dest');
+    const dest = files.createFolder(adminId(), ROOT_ID, 'dest');
     const ok = await upload(ROOT_ID, 'ok.txt');
     const res = await call('POST', '/api/files/bulk/move', {
       ids: [ok.id, 'does-not-exist'],
@@ -83,7 +89,7 @@ describe('bulk operations API', () => {
   });
 
   it('copies into a folder, auto-renaming on a name clash', async () => {
-    const dest = files.createFolder(ROOT_ID, 'dest');
+    const dest = files.createFolder(adminId(), ROOT_ID, 'dest');
     const a = await upload(ROOT_ID, 'note.txt', 'hello');
     await upload(dest.id, 'note.txt', 'existing'); // clash
 
@@ -96,7 +102,7 @@ describe('bulk operations API', () => {
 
   it('deletes several items', async () => {
     const a = await upload(ROOT_ID, 'a.txt');
-    const folder = files.createFolder(ROOT_ID, 'gone');
+    const folder = files.createFolder(adminId(), ROOT_ID, 'gone');
     await upload(folder.id, 'inner.txt');
 
     const res = await call('POST', '/api/files/bulk/delete', { ids: [a.id, folder.id] });
@@ -107,7 +113,7 @@ describe('bulk operations API', () => {
   it('generates friendly aliases for a selection, keeping existing ones', async () => {
     const a = await upload(ROOT_ID, 'My Report.txt');
     const b = await upload(ROOT_ID, 'b.txt');
-    files.setAlias(b.id, 'keep-me');
+    files.setAlias(adminId(), b.id, 'keep-me');
 
     const res = await call('POST', '/api/files/bulk/alias', { ids: [a.id, b.id] });
     expect(JSON.parse(res.body).succeeded).toHaveLength(2);
@@ -116,7 +122,7 @@ describe('bulk operations API', () => {
   });
 
   it('copies a single item via POST /:id/copy', async () => {
-    const dest = files.createFolder(ROOT_ID, 'dest');
+    const dest = files.createFolder(adminId(), ROOT_ID, 'dest');
     const a = await upload(ROOT_ID, 'one.txt', 'body');
     const res = await call('POST', `/api/files/${a.id}/copy`, { parentId: dest.id });
     expect(res.status).toBe(201);

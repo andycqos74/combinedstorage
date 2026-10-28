@@ -7,8 +7,9 @@ local quota plus a 1 GB OneDrive appears as 2 GB. Uploads are placed automatical
 backend has room, and every file is reachable at a stable public URL so the system also works as
 a CDN.
 
-> Proof of concept: single admin user, backends = **local disk + OneDrive + Google Drive**. The
-> architecture is built so adding S3, etc. is "one new provider file + one admin form".
+> Proof of concept: **multi-user** (each user has a private file tree and connects their own
+> drives), backends = **local disk + OneDrive + Google Drive**. The architecture is built so adding
+> S3, etc. is "one new provider file + one admin form".
 
 ## How it works
 
@@ -17,6 +18,8 @@ The trick is a small **metadata database** (SQLite) that separates the *logical*
 
 - The `nodes` table holds folders and files — names, paths, sizes — as the user sees them.
 - Each **file** node points at its bytes with `(backend_id, object_key)`.
+- The `users` table holds accounts. Every node and backend has an `owner_id`, and each user's tree
+  hangs off their own root folder, so users never see each other's files or drives.
 - Each backend implements one interface (`StorageProvider`: `put` / `get` / `delete` / `quota`).
 
 Because logical names are decoupled from opaque physical keys:
@@ -27,11 +30,11 @@ Because logical names are decoupled from opaque physical keys:
 
 ```
 Browser (React SPA)
-   │  /api/*        management + admin  (admin session required)
+   │  /api/*        files, storage, accounts  (signed-in user; acts on their own data)
    │  /f/:token     public CDN file serving (no auth, supports Range)
    ▼
 Express server (TypeScript)
-   ├─ routes/     auth · files · admin · oauth · cdn
+   ├─ routes/     auth · files · backends · users · oauth · cdn
    ├─ services/   placement (most-free-space) · files · quota (aggregate)
    ├─ storage/    StorageProvider ── local.ts · onedrive.ts (Graph) · googledrive.ts (Drive API)
    └─ db/         SQLite metadata (tree + backend registry)
@@ -48,9 +51,11 @@ Express server (TypeScript)
   image editing**.
 - Optional **image conversion on upload** (resize + WebP) and **on-demand sizes** from the file
   URL (`?w=800`, `?w=400&h=400`) for CDN use.
-- Combined storage meter across all connected backends.
-- Admin page to **add local-disk backends** and **connect OneDrive / Google Drive**, enable/disable
-  or remove them.
+- Combined storage meter across all of your connected backends.
+- **Multiple users.** Each user signs in with their own account, has a private file tree, and on
+  the **Storage** page **connects their own OneDrive / Google Drive** accounts, which pool only
+  for them. Admins create accounts (or turn on self sign-up), reset passwords, and can allocate
+  **local-disk backends** to any user. See [Users and accounts](#users-and-accounts).
 - Automatic upload placement (most-free-space first) with a clear "insufficient space" error.
 - Public, cacheable file URLs with HTTP **Range** support (media seeking) and ETag/`304`.
 - **Mount as a Windows drive** (WebDAV endpoint at `/dav`) via rclone + WinFsp.
@@ -85,7 +90,8 @@ npm start
 
 Sign in with the `ADMIN_USERNAME` / `ADMIN_PASSWORD` from your `.env` (defaults `admin` /
 `changeme`). Then open **Storage**, add one or two local backends (give each a name and a quota),
-switch to **Files**, and start creating folders and uploading.
+switch to **Files**, and start creating folders and uploading. To add more people, open
+**Account & users**.
 
 ## Run with Docker
 
@@ -310,7 +316,8 @@ means regenerating the credentials in Azure / Google Cloud.
 | `PORT` | Server port | `4000` |
 | `PUBLIC_BASE_URL` | Base URL used to build public CDN links | `http://localhost:4000` |
 | `DATA_DIR` | SQLite DB + local blobs (relative to `server/`, or an absolute path) | `./data` |
-| `ADMIN_USERNAME` / `ADMIN_PASSWORD` | Admin login | `admin` / `changeme` |
+| `ADMIN_USERNAME` / `ADMIN_PASSWORD` | First admin account, created only when the database has no users | `admin` / `changeme` |
+| `ALLOW_SIGNUP` | Let anyone create an account from the sign-in page | `false` |
 | `SESSION_SECRET` | Signs the session cookie — set a long random value | _dev placeholder_ |
 | `COOKIE_SECURE` | Require HTTPS for the session cookie | on when `NODE_ENV=production` |
 | `AUTO_ALIAS_ON_UPLOAD` | Auto-generate a friendly alias for every upload | `false` |
@@ -321,7 +328,7 @@ means regenerating the credentials in Azure / Google Cloud.
 | `IMAGE_CONVERT_ON_DRIVE` | Also convert writes from the Windows drive | `true` |
 | `IMAGE_VARIANTS_ENABLED` | Serve `?w=…&fmt=…` renditions from the file URL | `true` |
 | `DAV_ENABLED` | Serve the WebDAV drive at `/dav` | `true` |
-| `DAV_USERNAME` / `DAV_PASSWORD` | Drive Basic-auth credentials | admin login |
+| `DAV_USERNAME` / `DAV_PASSWORD` | Legacy extra drive login that acts as the first admin (each user already signs in with their own account) | _unset_ |
 | `MS_CLIENT_ID` / `MS_CLIENT_SECRET` | Azure app credentials (OneDrive) | _empty (OneDrive off)_ |
 | `MS_TENANT` | `common` (personal + work/school) or a tenant id | `common` |
 | `MS_REDIRECT_URI` | OAuth callback URL | `http://localhost:4000/api/oauth/onedrive/callback` |
@@ -484,9 +491,12 @@ powershell -ExecutionPolicy Bypass -File .\clients\windows\mount-combinedstorage
 
 Details:
 
-- The endpoint uses **HTTP Basic auth** (separate from the web session). Credentials default to the
-  admin login, or set `DAV_USERNAME` / `DAV_PASSWORD` for dedicated drive credentials; disable it
+- The endpoint uses **HTTP Basic auth** (separate from the web session). Each user signs in with
+  their own username and password and sees only their own files. `DAV_USERNAME` /
+  `DAV_PASSWORD`, if set, still work as an extra login for the first admin. Disable the endpoint
   with `DAV_ENABLED=false`.
+- With rclone's Nextcloud mode the URL contains a username
+  (`/remote.php/dav/files/<user>`); use your own, matching the login you configure.
 - Editing a file from the drive **preserves its `/f/<token>` CDN link and friendly alias** (a PUT
   overwrite keeps the same file identity).
 - **Large files are chunked.** The server also implements the Nextcloud chunked-upload protocol at
@@ -499,22 +509,55 @@ Details:
   avoids the built-in client's 50 MB limit, and is the only path that chunks large uploads.
 - **Behind Cloudflare:** ensure the tunnel passes WebDAV methods (PROPFIND, MKCOL, MOVE, COPY, LOCK).
 
+## Users and accounts
+
+Every user has a **private file tree** and **their own storage backends**. Uploads only land on the
+uploader's own backends, the storage meter only counts them, and another user's files and drives are
+invisible (asking for one by id answers 404).
+
+- **The first admin** is created from `ADMIN_USERNAME` / `ADMIN_PASSWORD` the first time the server
+  starts with an empty user table. After that, accounts live in the database: change passwords in
+  the app (**Account**), not in `.env` — editing `ADMIN_PASSWORD` later has no effect.
+- **Upgrading** from the single-user version needs no action: on first start the existing admin
+  login becomes the first admin account and every existing file and backend is assigned to it.
+- **Adding users.** An admin creates accounts on **Account & users** (username, password, role),
+  and can reset passwords, promote/demote admins, or delete an account. Deleting an account also
+  deletes its files — including their copies on its connected drives — and its backends. There is
+  always at least one admin.
+- **Self sign-up.** Set `ALLOW_SIGNUP=true` to show *Create an account* on the sign-in page. New
+  accounts are regular users.
+- **Connecting drives.** Each user opens **Storage → Connect** for OneDrive or Google Drive and signs
+  in to *their own* Microsoft / Google account; the drive is attached to whoever started the
+  connection. The OAuth app (`MS_CLIENT_ID`, `GOOGLE_CLIENT_ID`, …) is set up once by the admin and
+  shared by everyone. For Google, while the OAuth consent screen is in *Testing*, add each user's
+  Google address as a test user (or publish the app); refresh tokens issued in Testing expire after
+  7 days.
+- **Local disk** uses the server's own storage, so only admins can create it, for themselves or for
+  any user (*For user* on the Storage page).
+- **WebDAV:** each user mounts the drive with their own login and sees only their own tree.
+
 ## API overview
 
-Management endpoints require the admin session cookie; `/f/:token` is public.
+Management endpoints require a signed-in session and act on that user's own files and backends
+(`root` in a folder id means the user's own root folder). `/api/users` and creating local-disk
+backends are admin-only. `/f/:token` is public.
 
 | Method & path | Description |
 | --- | --- |
-| `POST /api/auth/login` · `POST /api/auth/logout` · `GET /api/auth/me` | Admin session |
-| `GET /api/storage` | Combined + per-backend usage |
+| `POST /api/auth/login` · `POST /api/auth/logout` · `GET /api/auth/me` | Session |
+| `POST /api/auth/register` | Self sign-up (only with `ALLOW_SIGNUP=true`) |
+| `POST /api/auth/password` | Change your own password |
+| `GET /api/storage` | Your combined + per-backend usage |
 | `GET /api/files/:folderId` | List a folder (children + breadcrumb) |
 | `POST /api/files/:parentId/folders` | Create a folder |
 | `POST /api/files/:parentId/upload?name=…` | Upload (raw body = file bytes) |
 | `PATCH /api/files/:id/rename` · `PATCH /api/files/:id/move` · `DELETE /api/files/:id` | Modify |
 | `GET /api/files/:id/alias/suggest` · `PUT /api/files/:id/alias` · `DELETE /api/files/:id/alias` | Friendly link |
-| `GET /api/admin/backends` · `POST /api/admin/backends/local` | Manage backends |
-| `PATCH /api/admin/backends/:id` · `DELETE /api/admin/backends/:id` | Enable/disable, remove |
-| `GET /api/oauth/onedrive/start` · `GET /api/oauth/google/start` → callbacks | Connect a cloud backend |
+| `GET /api/backends` · `GET /api/backends/meta` | Your backends; which cloud providers are enabled |
+| `POST /api/backends/local` | Add a local-disk backend (admin; `ownerId` allocates it to a user) |
+| `PATCH /api/backends/:id` · `DELETE /api/backends/:id` | Enable/disable, remove one of yours |
+| `GET /api/oauth/onedrive/start` · `GET /api/oauth/google/start` → callbacks | Connect a cloud drive to your account |
+| `GET /api/users` · `POST /api/users` · `PATCH /api/users/:id` · `DELETE /api/users/:id` | Accounts (admin) |
 | `GET /f/:token` | Public file (CDN), supports Range |
 | `PROPFIND/GET/PUT/MKCOL/DELETE/MOVE/COPY … /dav/*` | WebDAV drive (own Basic auth) |
 | `… /remote.php/dav/files/:user/*` · `/remote.php/dav/uploads/:user/*` | Same drive, Nextcloud-shaped, with chunked uploads |
@@ -536,10 +579,11 @@ server/   Express API, storage engine, SQLite metadata
     app.ts     builds the Express app     index.ts  starts it
     storage/   provider.ts (interface) · local.ts · onedrive.ts · googledrive.ts · registry.ts
     services/  placement.ts · files.ts · quota.ts · webdav.ts
-    routes/    auth · files · admin · oauth · cdn · webdav
-    models/    nodes.ts · backends.ts        db/  schema · migrate
+    routes/    auth · files · backends · users · oauth · cdn · webdav
+    services/  … · users.ts (accounts, password checks) · backends.ts
+    models/    nodes.ts · backends.ts · users.ts        db/  schema · migrate
   test/      Vitest suites
-web/      React + Vite front end (Login / Files / Admin)
+web/      React + Vite front end (Login / Files / Storage / Account)
 clients/windows/   rclone + WinFsp mount script for the Windows drive
 ```
 
@@ -555,6 +599,7 @@ through `StorageProvider` and need no changes.
 ## Scope & limitations (proof of concept)
 
 - One file lives entirely on one backend (no striping a single file across backends).
-- Single admin user; no multi-tenant accounts.
+- No sharing between users: each file belongs to exactly one user (public CDN links aside).
+- No per-user storage limits beyond the drives each user connects (and local disk an admin allocates).
 - No versioning/trash; files are public via an unguessable token (no per-file share controls).
 - Uploads stream through the server (no direct browser-to-backend transfer).

@@ -1,21 +1,32 @@
 /**
  * Database schema for the combined-storage metadata layer.
  *
- * Two tables carry the whole model:
- *   - backends: the registry of connected storage backends (local disk, OneDrive, ...).
+ * Three tables carry the whole model:
+ *   - users:    accounts. Each user has a private file tree and their own storage backends.
+ *   - backends: the registry of connected storage backends (local disk, OneDrive, ...),
+ *               each owned by one user.
  *   - nodes:    the logical file tree. A file node points at its physical location via
  *               (backend_id, object_key); folders are metadata-only. Because logical
  *               names live here and object keys are opaque, rename/move are pure DB ops.
  *
- * The tree is anchored by a single seeded root node (id = 'root', parent_id = NULL) so
- * that UNIQUE(parent_id, name) also enforces uniqueness at the top level (SQLite treats
- * NULLs as distinct, which would otherwise let duplicate root names slip through).
+ * Each user's tree is anchored by their own root node (parent_id = NULL, referenced by
+ * users.root_id). The first admin's root keeps the historical id 'root'. Every node carries
+ * its owner_id so access checks never need to walk up to the root.
  */
 export const SCHEMA_SQL = `
+CREATE TABLE IF NOT EXISTS users (
+  id            TEXT PRIMARY KEY,
+  username      TEXT NOT NULL UNIQUE COLLATE NOCASE,
+  password_hash TEXT NOT NULL,                      -- scrypt$<salt>$<hash>
+  role          TEXT NOT NULL DEFAULT 'user',       -- 'admin' | 'user'
+  root_id       TEXT NOT NULL,                      -- this user's tree root node
+  created_at    TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS backends (
   id           TEXT PRIMARY KEY,
   name         TEXT NOT NULL,
-  type         TEXT NOT NULL,                       -- 'local' | 'onedrive'
+  type         TEXT NOT NULL,                       -- 'local' | 'onedrive' | 'googledrive'
   config       TEXT NOT NULL,                       -- JSON, provider-specific
   status       TEXT NOT NULL DEFAULT 'connected',   -- 'connected' | 'error'
   enabled      INTEGER NOT NULL DEFAULT 1,
@@ -44,6 +55,7 @@ CREATE TABLE IF NOT EXISTS nodes (
 CREATE INDEX IF NOT EXISTS idx_nodes_parent  ON nodes(parent_id);
 CREATE INDEX IF NOT EXISTS idx_nodes_backend ON nodes(backend_id);
 CREATE INDEX IF NOT EXISTS idx_nodes_token   ON nodes(public_token);
--- NOTE: the unique index on nodes(alias) is created in migrate() after ensuring the column
--- exists, so upgrading an existing database (added via ALTER TABLE) works too.
+-- NOTE: the unique index on nodes(alias) and the owner_id columns/indexes are created in
+-- migrate() after ensuring the columns exist, so upgrading an existing database (added via
+-- ALTER TABLE) works too.
 `;

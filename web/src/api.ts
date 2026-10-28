@@ -47,6 +47,28 @@ export interface Usage {
   backends: BackendUsage[];
 }
 
+export type Role = 'admin' | 'user';
+
+export interface Me {
+  authenticated: boolean;
+  username: string | null;
+  role: Role | null;
+  /** Whether the sign-in page may offer "Create account". */
+  signupEnabled: boolean;
+}
+
+/** An account as the admin's user list shows it. */
+export interface UserSummary {
+  id: string;
+  username: string;
+  role: Role;
+  createdAt: string;
+  backendCount: number;
+  capacity: number;
+  fileCount: number;
+  usedBytes: number;
+}
+
 /** Outcome of a bulk operation: some items may fail without aborting the rest. */
 export interface BulkResult {
   succeeded: string[];
@@ -212,10 +234,17 @@ async function replaceContent(
 }
 
 export const api = {
-  me: () => req<{ authenticated: boolean; username: string | null }>('/api/auth/me'),
+  me: () => req<Me>('/api/auth/me'),
   login: (username: string, password: string) =>
     req<{ ok: true }>('/api/auth/login', { method: 'POST', ...jsonBody({ username, password }) }),
+  register: (username: string, password: string) =>
+    req<{ ok: true }>('/api/auth/register', { method: 'POST', ...jsonBody({ username, password }) }),
   logout: () => req<{ ok: true }>('/api/auth/logout', { method: 'POST' }),
+  changePassword: (currentPassword: string, newPassword: string) =>
+    req<{ ok: true }>('/api/auth/password', {
+      method: 'POST',
+      ...jsonBody({ currentPassword, newPassword }),
+    }),
 
   list: (folderId: string) => req<ListResponse>(`/api/files/${folderId}`),
   storage: () => req<Usage>('/api/storage'),
@@ -247,14 +276,27 @@ export const api = {
     req<NodeDto>(`/api/files/${id}/alias`, { method: 'PUT', ...jsonBody({ alias }) }),
   clearAlias: (id: string) => req<NodeDto>(`/api/files/${id}/alias`, { method: 'DELETE' }),
 
+  // The signed-in user's own storage backends.
   meta: () =>
-    req<{ oneDriveConfigured: boolean; googleDriveConfigured: boolean }>('/api/admin/meta'),
-  backends: () => req<BackendUsage[]>('/api/admin/backends'),
-  addLocal: (name: string, quotaBytes: number) =>
-    req<BackendUsage>('/api/admin/backends/local', { method: 'POST', ...jsonBody({ name, quotaBytes }) }),
+    req<{ oneDriveConfigured: boolean; googleDriveConfigured: boolean }>('/api/backends/meta'),
+  backends: () => req<BackendUsage[]>('/api/backends'),
+  /** Admin only. `ownerId` allocates the disk to another user (defaults to the admin). */
+  addLocal: (name: string, quotaBytes: number, ownerId?: string) =>
+    req<BackendUsage>('/api/backends/local', {
+      method: 'POST',
+      ...jsonBody({ name, quotaBytes, ownerId }),
+    }),
   setBackendEnabled: (id: string, enabled: boolean) =>
-    req<BackendUsage>(`/api/admin/backends/${id}`, { method: 'PATCH', ...jsonBody({ enabled }) }),
-  removeBackend: (id: string) => req<{ ok: true }>(`/api/admin/backends/${id}`, { method: 'DELETE' }),
+    req<BackendUsage>(`/api/backends/${id}`, { method: 'PATCH', ...jsonBody({ enabled }) }),
+  removeBackend: (id: string) => req<{ ok: true }>(`/api/backends/${id}`, { method: 'DELETE' }),
+
+  // Account management (admin only).
+  users: () => req<UserSummary[]>('/api/users'),
+  createUser: (username: string, password: string, role: Role) =>
+    req<UserSummary>('/api/users', { method: 'POST', ...jsonBody({ username, password, role }) }),
+  updateUser: (id: string, changes: { password?: string; role?: Role }) =>
+    req<UserSummary>(`/api/users/${id}`, { method: 'PATCH', ...jsonBody(changes) }),
+  deleteUser: (id: string) => req<{ ok: true }>(`/api/users/${id}`, { method: 'DELETE' }),
 };
 
 export function errorMessage(err: unknown): string {

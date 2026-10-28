@@ -18,12 +18,20 @@ export interface NodeRow {
   object_key: string | null;
   public_token: string | null;
   alias: string | null;
+  owner_id: string;
   created_at: string;
   updated_at: string;
 }
 
 export function getNode(id: string): NodeRow | undefined {
   return db.prepare('SELECT * FROM nodes WHERE id = ?').get(id) as NodeRow | undefined;
+}
+
+/** A node, but only if it belongs to the given user (undefined otherwise, as if missing). */
+export function getOwnedNode(ownerId: string, id: string): NodeRow | undefined {
+  return db
+    .prepare('SELECT * FROM nodes WHERE id = ? AND owner_id = ?')
+    .get(id, ownerId) as NodeRow | undefined;
 }
 
 export function getFileByToken(token: string): NodeRow | undefined {
@@ -70,13 +78,15 @@ export function childByName(parentId: string, name: string): NodeRow | undefined
     .get(parentId, name) as NodeRow | undefined;
 }
 
+// New nodes inherit their owner from the parent folder, so a tree never mixes owners.
+
 export function createFolderNode(parentId: string, name: string, path: string): NodeRow {
   const id = newId();
   const now = nowIso();
   db.prepare(
-    `INSERT INTO nodes (id, parent_id, name, type, path, created_at, updated_at)
-     VALUES (?, ?, ?, 'folder', ?, ?, ?)`,
-  ).run(id, parentId, name, path, now, now);
+    `INSERT INTO nodes (id, parent_id, name, type, path, owner_id, created_at, updated_at)
+     VALUES (?, ?, ?, 'folder', ?, (SELECT owner_id FROM nodes WHERE id = ?), ?, ?)`,
+  ).run(id, parentId, name, path, parentId, now, now);
   return getNode(id)!;
 }
 
@@ -93,8 +103,9 @@ export function createFileNode(input: {
   const now = nowIso();
   db.prepare(
     `INSERT INTO nodes
-       (id, parent_id, name, type, path, size, mime_type, backend_id, object_key, public_token, created_at, updated_at)
-     VALUES (?, ?, ?, 'file', ?, ?, ?, ?, ?, ?, ?, ?)`,
+       (id, parent_id, name, type, path, size, mime_type, backend_id, object_key, public_token,
+        owner_id, created_at, updated_at)
+     VALUES (?, ?, ?, 'file', ?, ?, ?, ?, ?, ?, (SELECT owner_id FROM nodes WHERE id = ?), ?, ?)`,
   ).run(
     id,
     input.parentId,
@@ -105,6 +116,7 @@ export function createFileNode(input: {
     input.backendId,
     input.objectKey,
     publicToken(),
+    input.parentId,
     now,
     now,
   );
@@ -181,4 +193,21 @@ export function countFilesOnBackend(backendId: string): number {
     .prepare("SELECT COUNT(*) AS c FROM nodes WHERE backend_id = ? AND type = 'file'")
     .get(backendId) as { c: number };
   return row.c;
+}
+
+/** Every file a user owns (used to remove their stored bytes when the account is deleted). */
+export function listFilesOwnedBy(ownerId: string): NodeRow[] {
+  return db
+    .prepare("SELECT * FROM nodes WHERE owner_id = ? AND type = 'file'")
+    .all(ownerId) as NodeRow[];
+}
+
+/** File count and total bytes a user owns. */
+export function ownerFileStats(ownerId: string): { files: number; bytes: number } {
+  return db
+    .prepare(
+      `SELECT COUNT(*) AS files, COALESCE(SUM(size), 0) AS bytes
+       FROM nodes WHERE owner_id = ? AND type = 'file'`,
+    )
+    .get(ownerId) as { files: number; bytes: number };
 }

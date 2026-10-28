@@ -4,6 +4,7 @@ import {
   ROOT_ID,
   type NodeRow,
   getNode,
+  getOwnedNode,
   getFileByToken,
   getFileByHandle,
   handleInUse,
@@ -20,6 +21,7 @@ import {
   collectSubtree,
 } from '../models/nodes';
 import { getBackend } from '../models/backends';
+import { getUser } from '../models/users';
 import { providerFor } from '../storage/registry';
 import type { ByteRange, GetResult } from '../storage/provider';
 import { chooseBackend } from './placement';
@@ -124,16 +126,40 @@ async function applyUploadConversion(
   };
 }
 
-function requireFolder(id: string, label = 'Folder'): NodeRow {
-  const node = getNode(id);
+// ---- ownership -------------------------------------------------------------
+// Every operation takes the acting user's id. Nodes owned by someone else resolve exactly like
+// missing ones (404), so one user cannot discover, read or touch another user's tree. The id
+// "root" is accepted as an alias for the user's own root folder.
+
+function ownedNode(userId: string, id: string): NodeRow | undefined {
+  if (id === ROOT_ID) {
+    const user = getUser(userId);
+    return user ? getOwnedNode(userId, user.root_id) : undefined;
+  }
+  return getOwnedNode(userId, id);
+}
+
+function requireNode(userId: string, id: string): NodeRow {
+  const node = ownedNode(userId, id);
+  if (!node) throw new NotFoundError('Item not found.');
+  return node;
+}
+
+function requireFolder(userId: string, id: string, label = 'Folder'): NodeRow {
+  const node = ownedNode(userId, id);
   if (!node || node.type !== 'folder') throw new NotFoundError(`${label} not found.`);
   return node;
 }
 
-function requireFile(id: string): NodeRow {
-  const node = getNode(id);
+function requireFile(userId: string, id: string): NodeRow {
+  const node = ownedNode(userId, id);
   if (!node || node.type !== 'file') throw new NotFoundError('File not found.');
   return node;
+}
+
+/** A user's root folder has no parent. */
+function isRoot(node: NodeRow): boolean {
+  return node.parent_id === null;
 }
 
 /** Rewrite the `path` of every descendant after a folder is renamed or moved. */
@@ -147,17 +173,20 @@ function repathDescendants(folderId: string, newFolderPath: string): void {
 
 // ---- reads -----------------------------------------------------------------
 
-export function listFolder(folderId: string): { folder: NodeRow; children: NodeRow[] } {
-  const folder = requireFolder(folderId);
-  return { folder, children: listChildren(folderId) };
+export function listFolder(
+  userId: string,
+  folderId: string,
+): { folder: NodeRow; children: NodeRow[] } {
+  const folder = requireFolder(userId, folderId);
+  return { folder, children: listChildren(folder.id) };
 }
 
 /** Ancestor chain from the root down to (and including) the folder, for breadcrumbs. */
-export function breadcrumb(folderId: string): { id: string; name: string }[] {
+export function breadcrumb(userId: string, folderId: string): { id: string; name: string }[] {
   const chain: { id: string; name: string }[] = [];
-  let cur: NodeRow | undefined = getNode(folderId);
+  let cur: NodeRow | undefined = ownedNode(userId, folderId);
   while (cur) {
-    chain.unshift({ id: cur.id, name: cur.id === ROOT_ID ? 'Home' : cur.name });
+    chain.unshift({ id: cur.id, name: isRoot(cur) ? 'Home' : cur.name });
     cur = cur.parent_id ? getNode(cur.parent_id) : undefined;
   }
   return chain;
@@ -165,13 +194,13 @@ export function breadcrumb(folderId: string): { id: string; name: string }[] {
 
 // ---- mutations -------------------------------------------------------------
 
-export function createFolder(parentId: string, rawName: string): NodeRow {
-  const parent = requireFolder(parentId, 'Parent folder');
+export function createFolder(userId: string, parentId: string, rawName: string): NodeRow {
+  const parent = requireFolder(userId, parentId, 'Parent folder');
   const name = validateName(rawName);
-  if (childByName(parentId, name)) {
+  if (childByName(parent.id, name)) {
     throw new BadRequestError('An item with that name already exists here.');
   }
-  return createFolderNode(parentId, name, joinPath(parent.path, name));
+  return createFolderNode(parent.id, name, joinPath(parent.path, name));
 }
 
 /**
@@ -180,16 +209,19 @@ export function createFolder(parentId: string, rawName: string): NodeRow {
  * bytes the provider actually wrote. When AUTO_ALIAS_ON_UPLOAD is on, a friendly alias is
  * generated from the name.
  */
-export async function uploadFile(input: {
-  parentId: string;
-  name: string;
-  stream: Readable;
-  size: number;
-  mimeType?: string;
-}): Promise<NodeRow> {
-  const parent = requireFolder(input.parentId, 'Parent folder');
+export async function uploadFile(
+  userId: string,
+  input: {
+    parentId: string;
+    name: string;
+    stream: Readable;
+    size: number;
+    mimeType?: string;
+  },
+): Promise<NodeRow> {
+  const parent = requireFolder(userId, input.parentId, 'Parent folder');
   const requestedName = validateName(input.name);
-  if (childByName(input.parentId, requestedName)) {
+  if (childByName(parent.id, requestedName)) {
     throw new BadRequestError('An item with that name already exists here.');
   }
 
@@ -200,17 +232,18 @@ export async function uploadFile(input: {
     mimeType: input.mimeType || mimeLookup(requestedName) || 'application/octet-stream',
   });
   // Conversion can change the extension (photo.jpg -> photo.webp), which may collide.
-  const name = content.name === requestedName ? requestedName : uniqueChildName(input.parentId, content.name);
+  const name =
+    content.name === requestedName ? requestedName : freeChildName(parent.id, content.name);
   const mimeType = content.mimeType;
 
-  const backend = await chooseBackend(content.size);
+  const backend = await chooseBackend(userId, content.size);
   const { objectKey, size } = await providerFor(backend).put(content.stream, {
     size: content.size,
     contentType: mimeType,
   });
 
   const node = createFileNode({
-    parentId: input.parentId,
+    parentId: parent.id,
     name,
     path: joinPath(parent.path, name),
     size,
@@ -226,47 +259,45 @@ export async function uploadFile(input: {
   return node;
 }
 
-export function rename(id: string, rawName: string): NodeRow {
-  const node = getNode(id);
-  if (!node) throw new NotFoundError('Item not found.');
-  if (node.id === ROOT_ID) throw new BadRequestError('The root folder cannot be renamed.');
+export function rename(userId: string, id: string, rawName: string): NodeRow {
+  const node = requireNode(userId, id);
+  if (isRoot(node)) throw new BadRequestError('The root folder cannot be renamed.');
 
   const name = validateName(rawName);
   const parentId = node.parent_id!;
   const clash = childByName(parentId, name);
-  if (clash && clash.id !== id) {
+  if (clash && clash.id !== node.id) {
     throw new BadRequestError('An item with that name already exists here.');
   }
 
   const parent = getNode(parentId)!;
   const newPath = joinPath(parent.path, name);
-  updateNodeNameAndPath(id, name, newPath);
-  if (node.type === 'folder') repathDescendants(id, newPath);
-  return getNode(id)!;
+  updateNodeNameAndPath(node.id, name, newPath);
+  if (node.type === 'folder') repathDescendants(node.id, newPath);
+  return getNode(node.id)!;
 }
 
-export function move(id: string, newParentId: string): NodeRow {
-  const node = getNode(id);
-  if (!node) throw new NotFoundError('Item not found.');
-  if (node.id === ROOT_ID) throw new BadRequestError('The root folder cannot be moved.');
+export function move(userId: string, id: string, newParentId: string): NodeRow {
+  const node = requireNode(userId, id);
+  if (isRoot(node)) throw new BadRequestError('The root folder cannot be moved.');
 
-  const dest = requireFolder(newParentId, 'Destination folder');
+  const dest = requireFolder(userId, newParentId, 'Destination folder');
   if (dest.id === node.parent_id) return node; // already there
 
   if (node.type === 'folder') {
-    const subtreeIds = new Set(collectSubtree(id).map((n) => n.id));
-    if (subtreeIds.has(newParentId)) {
+    const subtreeIds = new Set(collectSubtree(node.id).map((n) => n.id));
+    if (subtreeIds.has(dest.id)) {
       throw new BadRequestError('A folder cannot be moved into itself or one of its subfolders.');
     }
   }
-  if (childByName(newParentId, node.name)) {
+  if (childByName(dest.id, node.name)) {
     throw new BadRequestError('An item with that name already exists in the destination.');
   }
 
   const newPath = joinPath(dest.path, node.name);
-  updateNodeParentAndPath(id, newParentId, newPath);
-  if (node.type === 'folder') repathDescendants(id, newPath);
-  return getNode(id)!;
+  updateNodeParentAndPath(node.id, dest.id, newPath);
+  if (node.type === 'folder') repathDescendants(node.id, newPath);
+  return getNode(node.id)!;
 }
 
 /**
@@ -274,12 +305,17 @@ export function move(id: string, newParentId: string): NodeRow {
  * backend first (best-effort — an orphaned blob is harmless since the DB is the source of
  * truth); the row delete then cascades to descendants via ON DELETE CASCADE.
  */
-export async function remove(id: string): Promise<void> {
-  const node = getNode(id);
-  if (!node) throw new NotFoundError('Item not found.');
-  if (node.id === ROOT_ID) throw new BadRequestError('The root folder cannot be deleted.');
+export async function remove(userId: string, id: string): Promise<void> {
+  const node = requireNode(userId, id);
+  if (isRoot(node)) throw new BadRequestError('The root folder cannot be deleted.');
 
-  for (const n of collectSubtree(id)) {
+  await deleteStoredBytes(collectSubtree(node.id));
+  deleteNodeRow(node.id);
+}
+
+/** Best-effort removal of file nodes' bytes from their backends. */
+export async function deleteStoredBytes(nodes: NodeRow[]): Promise<void> {
+  for (const n of nodes) {
     if (n.type === 'file' && n.backend_id && n.object_key) {
       const backend = getBackend(n.backend_id);
       if (!backend) continue;
@@ -290,7 +326,6 @@ export async function remove(id: string): Promise<void> {
       }
     }
   }
-  deleteNodeRow(id);
 }
 
 /**
@@ -299,16 +334,19 @@ export async function remove(id: string): Promise<void> {
  * in-place edit — while its bytes are repointed to a freshly-stored object and the old object
  * is removed.
  */
-export async function writeFileAtPath(input: {
-  parentId: string;
-  name: string;
-  stream: Readable;
-  size: number;
-  mimeType?: string;
-}): Promise<NodeRow> {
-  const parent = requireFolder(input.parentId, 'Parent folder');
+export async function writeFileAtPath(
+  userId: string,
+  input: {
+    parentId: string;
+    name: string;
+    stream: Readable;
+    size: number;
+    mimeType?: string;
+  },
+): Promise<NodeRow> {
+  const parent = requireFolder(userId, input.parentId, 'Parent folder');
   const requestedName = validateName(input.name);
-  const existingAtRequested = childByName(input.parentId, requestedName);
+  const existingAtRequested = childByName(parent.id, requestedName);
   if (existingAtRequested && existingAtRequested.type === 'folder') {
     throw new BadRequestError('A folder with that name already exists here.');
   }
@@ -325,12 +363,12 @@ export async function writeFileAtPath(input: {
   const name = content.name;
   const mimeType = content.mimeType;
   // Re-resolve after a possible extension change so a repeat save overwrites the same node.
-  const existing = name === requestedName ? existingAtRequested : childByName(input.parentId, name);
+  const existing = name === requestedName ? existingAtRequested : childByName(parent.id, name);
   if (existing && existing.type === 'folder') {
     throw new BadRequestError('A folder with that name already exists here.');
   }
 
-  const backend = await chooseBackend(content.size);
+  const backend = await chooseBackend(userId, content.size);
   const { objectKey, size } = await providerFor(backend).put(content.stream, {
     size: content.size,
     contentType: mimeType,
@@ -355,7 +393,7 @@ export async function writeFileAtPath(input: {
   }
 
   const node = createFileNode({
-    parentId: input.parentId,
+    parentId: parent.id,
     name,
     path: joinPath(parent.path, name),
     size,
@@ -375,16 +413,19 @@ export async function writeFileAtPath(input: {
  * edit (e.g. saving from the image editor) never breaks links that were already shared.
  * Placement runs again, so the new content may land on a different backend.
  */
-export async function replaceFileContent(input: {
-  id: string;
-  stream: Readable;
-  size: number;
-  mimeType?: string;
-}): Promise<NodeRow> {
-  const node = requireFile(input.id);
+export async function replaceFileContent(
+  userId: string,
+  input: {
+    id: string;
+    stream: Readable;
+    size: number;
+    mimeType?: string;
+  },
+): Promise<NodeRow> {
+  const node = requireFile(userId, input.id);
   const mimeType = input.mimeType || node.mime_type || 'application/octet-stream';
 
-  const backend = await chooseBackend(input.size);
+  const backend = await chooseBackend(userId, input.size);
   const { objectKey, size } = await providerFor(backend).put(input.stream, {
     size: input.size,
     contentType: mimeType,
@@ -421,16 +462,23 @@ export function fileEtag(node: NodeRow): string | undefined {
   return `"${node.public_token}-${version.toString(36)}"`;
 }
 
-/** The display name of a node, or undefined if it no longer exists (used for error reporting). */
-export function nodeName(id: string): string | undefined {
-  return getNode(id)?.name;
+/** The display name of a user's node, or undefined if it is missing (used for error reporting). */
+export function nodeName(userId: string, id: string): string | undefined {
+  return ownedNode(userId, id)?.name;
 }
 
 /**
- * A name that doesn't collide in the destination folder: "report.pdf" -> "report (2).pdf".
- * Used when copying into a folder that already has an item with that name.
+ * A name that doesn't collide in the user's destination folder: "report.pdf" -> "report (2).pdf".
+ * Used when copying into a folder that already has an item with that name. A missing folder
+ * returns the name unchanged; the operation that follows reports the 404.
  */
-export function uniqueChildName(parentId: string, name: string): string {
+export function uniqueChildName(userId: string, parentId: string, name: string): string {
+  const parent = ownedNode(userId, parentId);
+  return parent ? freeChildName(parent.id, name) : name;
+}
+
+/** uniqueChildName for an already-resolved folder id. */
+function freeChildName(parentId: string, name: string): string {
   if (!childByName(parentId, name)) return name;
   const dot = name.lastIndexOf('.');
   const stem = dot > 0 ? name.slice(0, dot) : name;
@@ -444,42 +492,42 @@ export function uniqueChildName(parentId: string, name: string): string {
 
 /** Copy a file or a whole folder subtree to a destination folder (WebDAV COPY). */
 export async function copyNode(
+  userId: string,
   id: string,
   destParentId: string,
   destName: string,
   overwrite: boolean,
 ): Promise<NodeRow> {
-  const node = getNode(id);
-  if (!node) throw new NotFoundError('Item not found.');
-  const destParent = requireFolder(destParentId, 'Destination folder');
+  const node = requireNode(userId, id);
+  const destParent = requireFolder(userId, destParentId, 'Destination folder');
   const name = validateName(destName);
 
-  const clash = childByName(destParentId, name);
+  const clash = childByName(destParent.id, name);
   if (clash) {
     if (!overwrite) throw new BadRequestError('An item with that name already exists in the destination.');
-    await remove(clash.id);
+    await remove(userId, clash.id);
   }
 
   if (node.type === 'folder') {
-    if (new Set(collectSubtree(id).map((n) => n.id)).has(destParentId)) {
+    if (new Set(collectSubtree(node.id).map((n) => n.id)).has(destParent.id)) {
       throw new BadRequestError('A folder cannot be copied into itself or one of its subfolders.');
     }
-    const newFolder = createFolderNode(destParentId, name, joinPath(destParent.path, name));
-    for (const child of listChildren(id)) {
-      await copyNode(child.id, newFolder.id, child.name, false);
+    const newFolder = createFolderNode(destParent.id, name, joinPath(destParent.path, name));
+    for (const child of listChildren(node.id)) {
+      await copyNode(userId, child.id, newFolder.id, child.name, false);
     }
     return getNode(newFolder.id)!;
   }
 
   if (!node.backend_id || !node.object_key) throw new BadRequestError('File has no content to copy.');
   const src = await openFile(node);
-  const backend = await chooseBackend(node.size ?? 0);
+  const backend = await chooseBackend(userId, node.size ?? 0);
   const { objectKey, size } = await providerFor(backend).put(src.stream, {
     size: node.size ?? 0,
     contentType: node.mime_type ?? undefined,
   });
   return createFileNode({
-    parentId: destParentId,
+    parentId: destParent.id,
     name,
     path: joinPath(destParent.path, name),
     size,
@@ -493,51 +541,58 @@ export async function copyNode(
  * Move a node to a new parent and/or name in one validated step (WebDAV MOVE). Validates only
  * the final destination, avoiding the transient name clashes a separate move+rename could hit.
  */
-export function relocate(id: string, newParentId: string, newName: string): NodeRow {
-  const node = getNode(id);
-  if (!node) throw new NotFoundError('Item not found.');
-  if (node.id === ROOT_ID) throw new BadRequestError('The root folder cannot be moved.');
-  const dest = requireFolder(newParentId, 'Destination folder');
+export function relocate(
+  userId: string,
+  id: string,
+  newParentId: string,
+  newName: string,
+): NodeRow {
+  const node = requireNode(userId, id);
+  if (isRoot(node)) throw new BadRequestError('The root folder cannot be moved.');
+  const dest = requireFolder(userId, newParentId, 'Destination folder');
   const name = validateName(newName);
 
-  if (node.type === 'folder' && new Set(collectSubtree(id).map((n) => n.id)).has(newParentId)) {
+  if (node.type === 'folder' && new Set(collectSubtree(node.id).map((n) => n.id)).has(dest.id)) {
     throw new BadRequestError('A folder cannot be moved into itself or one of its subfolders.');
   }
-  const clash = childByName(newParentId, name);
-  if (clash && clash.id !== id) {
+  const clash = childByName(dest.id, name);
+  if (clash && clash.id !== node.id) {
     throw new BadRequestError('An item with that name already exists in the destination.');
   }
 
   const newPath = joinPath(dest.path, name);
-  updateNodeParentAndPath(id, newParentId, newPath);
-  if (name !== node.name) updateNodeNameAndPath(id, name, newPath);
-  if (node.type === 'folder') repathDescendants(id, newPath);
-  return getNode(id)!;
+  updateNodeParentAndPath(node.id, dest.id, newPath);
+  if (name !== node.name) updateNodeNameAndPath(node.id, name, newPath);
+  if (node.type === 'folder') repathDescendants(node.id, newPath);
+  return getNode(node.id)!;
 }
 
 // ---- friendly-alias operations ---------------------------------------------
 
 /** A unique alias suggestion for a file (does not persist it) plus its current alias. */
-export function suggestAlias(id: string): { suggestion: string; currentAlias: string | null } {
-  const node = requireFile(id);
+export function suggestAlias(
+  userId: string,
+  id: string,
+): { suggestion: string; currentAlias: string | null } {
+  const node = requireFile(userId, id);
   return { suggestion: uniqueAlias(node.name, node.id), currentAlias: node.alias };
 }
 
 /** Set (or replace) a file's friendly alias. Throws if the normalized slug is already taken. */
-export function setAlias(id: string, rawAlias: string): NodeRow {
-  const node = requireFile(id);
+export function setAlias(userId: string, id: string, rawAlias: string): NodeRow {
+  const node = requireFile(userId, id);
   const alias = normalizeAlias(rawAlias);
   if (handleInUse(alias, node.id)) {
     throw new BadRequestError('That friendly link is already in use — try another.');
   }
-  setNodeAlias(id, alias);
-  return getNode(id)!;
+  setNodeAlias(node.id, alias);
+  return getNode(node.id)!;
 }
 
-export function clearAlias(id: string): NodeRow {
-  requireFile(id);
-  setNodeAlias(id, null);
-  return getNode(id)!;
+export function clearAlias(userId: string, id: string): NodeRow {
+  const node = requireFile(userId, id);
+  setNodeAlias(node.id, null);
+  return getNode(node.id)!;
 }
 
 // ---- serving (used by the CDN endpoint) ------------------------------------

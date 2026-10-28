@@ -59,11 +59,11 @@ export async function backendUsage(row: BackendRow): Promise<BackendUsage> {
 }
 
 /**
- * The combined view the file manager shows: the sum of every usable backend's capacity
+ * The combined view the file manager shows: the sum of a user's usable backends' capacity
  * and usage. This is what makes a 1 GB local + 1 GB OneDrive appear as one 2 GB drive.
  */
-export async function aggregateQuota(): Promise<AggregateUsage> {
-  const rows = listUsableBackends();
+export async function aggregateQuota(ownerId: string): Promise<AggregateUsage> {
+  const rows = listUsableBackends(ownerId);
   const backends = await Promise.all(rows.map(backendUsage));
   const total = backends.reduce((sum, b) => sum + b.total, 0);
   const used = backends.reduce((sum, b) => sum + b.used, 0);

@@ -4,7 +4,7 @@ import type { AddressInfo } from 'node:net';
 import { app } from '../src/app';
 import { childByName, ROOT_ID } from '../src/models/nodes';
 import * as files from '../src/services/files';
-import { resetDb, makeLocalBackend } from './helpers';
+import { resetDb, makeLocalBackend, adminId } from './helpers';
 
 let server: http.Server;
 let port: number;
@@ -78,7 +78,7 @@ describe('WebDAV endpoint', () => {
   it('PUT overwrite keeps node id, token and alias; updates size', async () => {
     await dav('PUT', '/dav/a.txt', { body: 'v1' });
     const before = childByName(ROOT_ID, 'a.txt')!;
-    files.setAlias(before.id, 'my-link'); // give it a friendly alias
+    files.setAlias(adminId(), before.id, 'my-link'); // give it a friendly alias
 
     const res = await dav('PUT', '/dav/a.txt', { body: 'version two longer' });
     expect(res.status).toBe(204);

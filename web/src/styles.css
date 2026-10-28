@@ -421,6 +421,8 @@ input[type='checkbox'] {
   font-size: 14px;
   font-weight: 800;
   box-shadow: 0 0 14px rgba(42, 134, 245, 0.32);
+  padding: 0;
+  border: none;
 }
 
 .shell {
@@ -1702,12 +1704,115 @@ h2 {
   border-color: #5aa9ff;
   color: var(--on-accent);
 }
+.card.login .login-switch {
+  margin-top: 16px;
+  text-align: center;
+}
+.card.login button.link {
+  color: #7db8ff;
+}
+
+/* ---- account ------------------------------------------------------------ */
+
+.account-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  align-items: start;
+}
+.account-grid label,
+.user-form label {
+  display: block;
+  margin: 12px 0 0;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--text-2);
+}
+.account-grid input,
+.user-form input {
+  margin-top: 5px;
+}
+.account-grid .primary {
+  margin-top: 16px;
+}
+.success {
+  background: #eefaf3;
+  border: 1px solid #c4ebd3;
+  color: #17663a;
+  padding: 9px 13px;
+  border-radius: 10px;
+  margin: 10px 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+.dav-url {
+  display: block;
+  margin-top: 8px;
+  padding: 9px 12px;
+  border-radius: 10px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12.5px;
+  overflow-wrap: anywhere;
+}
+select {
+  font: inherit;
+  padding: 10px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  background: #fff;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+  width: 100%;
+  margin-top: 5px;
+}
+.user-form {
+  display: grid;
+  grid-template-columns: 1fr 1fr 160px auto;
+  gap: 12px;
+  align-items: end;
+}
+.user-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 8px;
+}
+.user-table th,
+.user-table td {
+  text-align: left;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--divider);
+  font-size: 13px;
+}
+.user-table th {
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--text-label);
+}
+.user-table tbody tr:last-child td {
+  border-bottom: none;
+}
+.user-table .actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+.table-scroll {
+  overflow-x: auto;
+}
 
 @media (max-width: 1000px) {
   .brand {
     margin-left: 0;
   }
   .add-forms,
+  .account-grid,
+  .user-form,
   .panes.two {
     grid-template-columns: 1fr;
   }

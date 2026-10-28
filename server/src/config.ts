@@ -60,15 +60,23 @@ export const config = {
   variantRoot: path.join(dataDir, 'variants'),
   /** Directory containing the built web SPA (served in production). */
   webDist: path.resolve(serverDir, '..', 'web', 'dist'),
+  // The first admin account, created only when the database has no users yet. After that the
+  // accounts live in the database: change passwords in the app, not here.
   admin: {
     username: adminUsername,
     password: adminPassword,
   },
-  // WebDAV drive endpoint (/dav). Enabled by default; credentials default to the admin login.
+  // Let anyone create an account from the sign-in page. Off by default: admins create accounts.
+  allowSignup: (process.env.ALLOW_SIGNUP ?? '').toLowerCase() === 'true',
+  // WebDAV drive endpoint (/dav). Enabled by default; every user signs in with their own login.
   dav: {
     enabled: (process.env.DAV_ENABLED ?? 'true').toLowerCase() !== 'false',
-    username: process.env.DAV_USERNAME || adminUsername,
-    password: process.env.DAV_PASSWORD || adminPassword,
+    // Separate WebDAV credentials from before user accounts existed. When both are set they
+    // still work, and sign in as the first admin.
+    legacy:
+      process.env.DAV_USERNAME && process.env.DAV_PASSWORD
+        ? { username: process.env.DAV_USERNAME, password: process.env.DAV_PASSWORD }
+        : null,
   },
   sessionSecret: process.env.SESSION_SECRET || 'dev-insecure-session-secret-change-me',
   isProd: process.env.NODE_ENV === 'production',

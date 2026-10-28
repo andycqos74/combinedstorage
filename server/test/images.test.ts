@@ -5,7 +5,7 @@ import { migrate, ROOT_ID } from '../src/db/migrate';
 import { config } from '../src/config';
 import * as files from '../src/services/files';
 import * as images from '../src/services/images';
-import { resetDb, makeLocalBackend } from './helpers';
+import { resetDb, makeLocalBackend, adminId } from './helpers';
 
 /** A photo-like JPEG that is deliberately larger than the conversion cap. */
 async function makeJpeg(width = 4000, height = 3000): Promise<Buffer> {
@@ -31,7 +31,7 @@ describe('upload conversion', () => {
   it('leaves images alone when conversion is disabled', async () => {
     config.images.convertOnUpload = false;
     const jpeg = await makeJpeg(800, 600);
-    const node = await files.uploadFile({
+    const node = await files.uploadFile(adminId(), {
       parentId: ROOT_ID,
       name: 'photo.jpg',
       stream: Readable.from(jpeg),
@@ -48,7 +48,7 @@ describe('upload conversion', () => {
     config.images.maxDimension = 1024;
     const jpeg = await makeJpeg(4000, 3000);
 
-    const node = await files.uploadFile({
+    const node = await files.uploadFile(adminId(), {
       parentId: ROOT_ID,
       name: 'holiday photo.JPG',
       stream: Readable.from(jpeg),
@@ -77,7 +77,7 @@ describe('upload conversion', () => {
       .webp({ quality: 1 })
       .toBuffer();
 
-    const node = await files.uploadFile({
+    const node = await files.uploadFile(adminId(), {
       parentId: ROOT_ID,
       name: 'tiny.webp',
       stream: Readable.from(webp),
@@ -90,7 +90,7 @@ describe('upload conversion', () => {
   it('does not touch non-image files or SVGs', async () => {
     config.images.convertOnUpload = true;
     const svg = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><rect width="10" height="10"/></svg>');
-    const node = await files.uploadFile({
+    const node = await files.uploadFile(adminId(), {
       parentId: ROOT_ID,
       name: 'logo.svg',
       stream: Readable.from(svg),
@@ -106,7 +106,7 @@ describe('upload conversion', () => {
     config.images.maxDimension = 512;
     const jpeg = await makeJpeg(2000, 2000);
 
-    const node = await files.writeFileAtPath({
+    const node = await files.writeFileAtPath(adminId(), {
       parentId: ROOT_ID,
       name: 'from-drive.jpg',
       stream: Readable.from(jpeg),
@@ -124,7 +124,7 @@ describe('upload conversion', () => {
     const jpeg = await makeJpeg(600, 400);
     expect(jpeg.length).toBeGreaterThan(1024);
 
-    const node = await files.uploadFile({
+    const node = await files.uploadFile(adminId(), {
       parentId: ROOT_ID,
       name: 'big.jpg',
       stream: Readable.from(jpeg),

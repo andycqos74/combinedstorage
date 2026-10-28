@@ -82,8 +82,10 @@ endpoint from that shape). The server implements the matching protocol.
 - **HTTPS is required** — the drive authenticates with HTTP Basic auth, which is only safe (and,
   for the built-in Windows client, only allowed) over TLS. The Cloudflare Tunnel already provides
   this at `https://file.amcmail.co.uk`.
-- **Credentials**: the drive uses the Combined Storage login (or the dedicated `DAV_USERNAME` /
-  `DAV_PASSWORD` if you set them on the server).
+- **Credentials**: each person mounts the drive with their own Combined Storage username and
+  password and sees only their own files. Use that same username in place of `admin` in the
+  examples above (`-User`, and the `/remote.php/dav/files/<user>` URL). The server's optional
+  `DAV_USERNAME` / `DAV_PASSWORD` still work as an extra login for the first admin.
 - **Edited files keep their links**: overwriting a file from the drive preserves its `/f/<token>`
   CDN link and any friendly alias.
 - **Cloudflare**: make sure the tunnel passes WebDAV methods (PROPFIND, MKCOL, MOVE, COPY, LOCK).

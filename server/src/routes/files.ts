@@ -1,15 +1,23 @@
-import express, { Router } from 'express';
+import express, { Router, type Request } from 'express';
 import { config } from '../config';
 import { asyncHandler } from '../util/asyncHandler';
 import { ROOT_ID, type NodeRow } from '../models/nodes';
 import { getBackend } from '../models/backends';
+import { currentUser } from '../middleware/auth';
 import * as files from '../services/files';
 import * as chunks from '../services/chunks';
 import { newId } from '../util/ids';
 import { BadRequestError } from '../util/errors';
 
+/** The signed-in user's file tree. Every operation is scoped to that user's own nodes. */
 export const filesRouter = Router();
 const json = express.json();
+
+/** Acting user's id. */
+const uid = (req: Request): string => currentUser(req).id;
+
+/** Staging-area name for an upload, namespaced per user so sessions cannot be shared. */
+const staging = (req: Request, uploadId: string): string => `${uid(req)}.${uploadId}`;
 
 /** Serialize a node row for the API, attaching the public CDN URL for files. */
 export function toDto(node: NodeRow) {
@@ -40,10 +48,10 @@ filesRouter.get(
   '/:folderId',
   asyncHandler(async (req, res) => {
     const folderId = req.params.folderId || ROOT_ID;
-    const { folder, children } = files.listFolder(folderId);
+    const { folder, children } = files.listFolder(uid(req), folderId);
     res.json({
       folder: toDto(folder),
-      breadcrumb: files.breadcrumb(folderId),
+      breadcrumb: files.breadcrumb(uid(req), folderId),
       children: children.map(toDto),
     });
   }),
@@ -54,7 +62,7 @@ filesRouter.post(
   '/:parentId/folders',
   json,
   asyncHandler(async (req, res) => {
-    const node = files.createFolder(req.params.parentId, String(req.body?.name ?? ''));
+    const node = files.createFolder(uid(req), req.params.parentId, String(req.body?.name ?? ''));
     res.status(201).json(toDto(node));
   }),
 );
@@ -67,7 +75,7 @@ filesRouter.post(
     const name = String(req.query.name ?? '');
     const size = Number(req.headers['content-length'] ?? 0);
     const contentType = req.headers['content-type'];
-    const node = await files.uploadFile({
+    const node = await files.uploadFile(uid(req), {
       parentId: req.params.parentId,
       name,
       stream: req,
@@ -88,6 +96,7 @@ interface BulkOutcome {
 }
 
 async function runBulk(
+  userId: string,
   ids: unknown,
   op: (id: string) => Promise<unknown> | unknown,
 ): Promise<BulkOutcome> {
@@ -103,7 +112,7 @@ async function runBulk(
     } catch (err) {
       result.failed.push({
         id,
-        name: files.nodeName(id),
+        name: files.nodeName(userId, id),
         error: err instanceof Error ? err.message : String(err),
       });
     }
@@ -116,7 +125,7 @@ filesRouter.post(
   json,
   asyncHandler(async (req, res) => {
     const parentId = String(req.body?.parentId ?? '');
-    res.json(await runBulk(req.body?.ids, (id) => files.move(id, parentId)));
+    res.json(await runBulk(uid(req), req.body?.ids, (id) => files.move(uid(req), id, parentId)));
   }),
 );
 
@@ -126,10 +135,11 @@ filesRouter.post(
   asyncHandler(async (req, res) => {
     const parentId = String(req.body?.parentId ?? '');
     res.json(
-      await runBulk(req.body?.ids, async (id) => {
-        const name = files.nodeName(id) ?? 'copy';
+      await runBulk(uid(req), req.body?.ids, async (id) => {
+        const name = files.nodeName(uid(req), id) ?? 'copy';
         // Auto-rename rather than failing when the destination already has that name.
-        await files.copyNode(id, parentId, files.uniqueChildName(parentId, name), false);
+        const destName = files.uniqueChildName(uid(req), parentId, name);
+        await files.copyNode(uid(req), id, parentId, destName, false);
       }),
     );
   }),
@@ -139,7 +149,7 @@ filesRouter.post(
   '/bulk/delete',
   json,
   asyncHandler(async (req, res) => {
-    res.json(await runBulk(req.body?.ids, (id) => files.remove(id)));
+    res.json(await runBulk(uid(req), req.body?.ids, (id) => files.remove(uid(req), id)));
   }),
 );
 
@@ -149,9 +159,9 @@ filesRouter.post(
   json,
   asyncHandler(async (req, res) => {
     res.json(
-      await runBulk(req.body?.ids, (id) => {
-        const { suggestion, currentAlias } = files.suggestAlias(id);
-        if (!currentAlias) files.setAlias(id, suggestion);
+      await runBulk(uid(req), req.body?.ids, (id) => {
+        const { suggestion, currentAlias } = files.suggestAlias(uid(req), id);
+        if (!currentAlias) files.setAlias(uid(req), id, suggestion);
       }),
     );
   }),
@@ -163,11 +173,14 @@ filesRouter.post(
   json,
   asyncHandler(async (req, res) => {
     const parentId = String(req.body?.parentId ?? '');
-    const requested = req.body?.name ? String(req.body.name) : (files.nodeName(req.params.id) ?? 'copy');
+    const requested = req.body?.name
+      ? String(req.body.name)
+      : (files.nodeName(uid(req), req.params.id) ?? 'copy');
     const node = await files.copyNode(
+      uid(req),
       req.params.id,
       parentId,
-      files.uniqueChildName(parentId, requested),
+      files.uniqueChildName(uid(req), parentId, requested),
       false,
     );
     res.status(201).json(toDto(node));
@@ -183,9 +196,9 @@ filesRouter.post(
 filesRouter.post(
   '/:parentId/upload-init',
   asyncHandler(async (req, res) => {
-    files.listFolder(req.params.parentId); // 404s if the parent folder is missing
+    files.listFolder(uid(req), req.params.parentId); // 404s if the parent folder is missing
     const uploadId = newId();
-    await chunks.createSession(uploadId);
+    await chunks.createSession(staging(req, uploadId));
     res.status(201).json({ uploadId, chunkSize: config.uploadChunkSize });
   }),
 );
@@ -197,7 +210,8 @@ filesRouter.put(
     const offset = Number(req.query.offset ?? 0);
     if (!Number.isFinite(offset) || offset < 0) throw new BadRequestError('Invalid chunk offset.');
     // Name chunks by zero-padded offset so they assemble in ascending order.
-    await chunks.writeChunk(req.params.uploadId, String(offset).padStart(15, '0'), req);
+    const chunkName = String(offset).padStart(15, '0');
+    await chunks.writeChunk(staging(req, req.params.uploadId), chunkName, req);
     res.status(204).end();
   }),
 );
@@ -209,9 +223,9 @@ filesRouter.post(
   asyncHandler(async (req, res) => {
     const { parentId, uploadId } = req.params;
     try {
-      const { paths, totalSize } = await chunks.sessionParts(uploadId);
+      const { paths, totalSize } = await chunks.sessionParts(staging(req, uploadId));
       if (paths.length === 0) throw new BadRequestError('No chunks were uploaded.');
-      const node = await files.uploadFile({
+      const node = await files.uploadFile(uid(req), {
         parentId,
         name: String(req.body?.name ?? ''),
         stream: chunks.concatStream(paths),
@@ -220,7 +234,7 @@ filesRouter.post(
       });
       res.status(201).json(toDto(node));
     } finally {
-      await chunks.destroySession(uploadId);
+      await chunks.destroySession(staging(req, uploadId));
     }
   }),
 );
@@ -235,7 +249,7 @@ filesRouter.put(
     const size = Number(req.headers['content-length'] ?? 0);
     const contentType =
       typeof req.headers['content-type'] === 'string' ? req.headers['content-type'] : undefined;
-    const node = await files.replaceFileContent({
+    const node = await files.replaceFileContent(uid(req), {
       id: req.params.id,
       stream: req,
       size: Number.isFinite(size) ? size : 0,
@@ -251,9 +265,9 @@ filesRouter.post(
   asyncHandler(async (req, res) => {
     const { id, uploadId } = req.params;
     try {
-      const { paths, totalSize } = await chunks.sessionParts(uploadId);
+      const { paths, totalSize } = await chunks.sessionParts(staging(req, uploadId));
       if (paths.length === 0) throw new BadRequestError('No chunks were uploaded.');
-      const node = await files.replaceFileContent({
+      const node = await files.replaceFileContent(uid(req), {
         id,
         stream: chunks.concatStream(paths),
         size: totalSize,
@@ -261,7 +275,7 @@ filesRouter.post(
       });
       res.json(toDto(node));
     } finally {
-      await chunks.destroySession(uploadId);
+      await chunks.destroySession(staging(req, uploadId));
     }
   }),
 );
@@ -270,7 +284,7 @@ filesRouter.post(
 filesRouter.delete(
   '/upload-chunk/:uploadId',
   asyncHandler(async (req, res) => {
-    await chunks.destroySession(req.params.uploadId);
+    await chunks.destroySession(staging(req, req.params.uploadId));
     res.status(204).end();
   }),
 );
@@ -280,7 +294,7 @@ filesRouter.patch(
   '/:id/rename',
   json,
   asyncHandler(async (req, res) => {
-    const node = files.rename(req.params.id, String(req.body?.name ?? ''));
+    const node = files.rename(uid(req), req.params.id, String(req.body?.name ?? ''));
     res.json(toDto(node));
   }),
 );
@@ -290,7 +304,7 @@ filesRouter.patch(
   '/:id/move',
   json,
   asyncHandler(async (req, res) => {
-    const node = files.move(req.params.id, String(req.body?.parentId ?? ''));
+    const node = files.move(uid(req), req.params.id, String(req.body?.parentId ?? ''));
     res.json(toDto(node));
   }),
 );
@@ -299,7 +313,7 @@ filesRouter.patch(
 filesRouter.delete(
   '/:id',
   asyncHandler(async (req, res) => {
-    await files.remove(req.params.id);
+    await files.remove(uid(req), req.params.id);
     res.json({ ok: true });
   }),
 );
@@ -310,7 +324,7 @@ filesRouter.delete(
 filesRouter.get(
   '/:id/alias/suggest',
   asyncHandler(async (req, res) => {
-    res.json(files.suggestAlias(req.params.id));
+    res.json(files.suggestAlias(uid(req), req.params.id));
   }),
 );
 
@@ -319,7 +333,7 @@ filesRouter.put(
   '/:id/alias',
   json,
   asyncHandler(async (req, res) => {
-    const node = files.setAlias(req.params.id, String(req.body?.alias ?? ''));
+    const node = files.setAlias(uid(req), req.params.id, String(req.body?.alias ?? ''));
     res.json(toDto(node));
   }),
 );
@@ -328,6 +342,6 @@ filesRouter.put(
 filesRouter.delete(
   '/:id/alias',
   asyncHandler(async (req, res) => {
-    res.json(toDto(files.clearAlias(req.params.id)));
+    res.json(toDto(files.clearAlias(uid(req), req.params.id)));
   }),
 );

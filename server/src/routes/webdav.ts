@@ -4,7 +4,7 @@ import { asyncHandler } from '../util/asyncHandler';
 import { parseRange } from '../util/range';
 import * as files from '../services/files';
 import * as dav from '../services/webdav';
-import { ROOT_ID } from '../models/nodes';
+import { currentUser } from '../middleware/auth';
 import { lockStore } from '../webdav/locks';
 
 export const webdavRouter = Router();
@@ -12,6 +12,9 @@ export const webdavRouter = Router();
 const ALLOW = 'OPTIONS, GET, HEAD, PROPFIND, PUT, DELETE, MKCOL, MOVE, COPY, PROPPATCH, LOCK, UNLOCK';
 
 // ---- helpers ---------------------------------------------------------------
+// Every request runs as the Basic-auth user, against that user's own tree.
+
+const uid = (req: Request): string => currentUser(req).id;
 
 /** Parse a Destination header (absolute URL or path) into logical path segments under the mount. */
 function parseDestination(req: Request): string[] | null {
@@ -43,19 +46,19 @@ function handleOptions(_req: Request, res: Response): void {
 
 function handlePropfind(req: Request, res: Response): void {
   const segments = dav.splitPath(req.path);
-  const node = dav.resolveByPath(segments);
+  const node = dav.resolveByPath(uid(req), segments);
   if (!node) {
     res.status(404).end();
     return;
   }
   const depth = (req.headers.depth ?? '1').toString() === '0' ? 0 : 1;
-  const quota = node.type === 'folder' ? dav.cachedQuota() : undefined;
+  const quota = node.type === 'folder' ? dav.cachedQuota(uid(req)) : undefined;
   const xml = dav.propfindXml({ mount: req.baseUrl, segments, node, depth, quota });
   res.status(207).setHeader('Content-Type', 'application/xml; charset=utf-8').send(xml);
 }
 
 async function handleGet(req: Request, res: Response): Promise<void> {
-  const node = dav.resolveByPath(dav.splitPath(req.path));
+  const node = dav.resolveByPath(uid(req), dav.splitPath(req.path));
   if (!node) {
     res.status(404).end();
     return;
@@ -93,16 +96,16 @@ async function handleGet(req: Request, res: Response): Promise<void> {
 
 async function handlePut(req: Request, res: Response): Promise<void> {
   const segments = dav.splitPath(req.path);
-  const target = dav.resolveParentAndName(segments);
+  const target = dav.resolveParentAndName(uid(req), segments);
   if (!target) {
     res.status(409).end(); // missing parent collection (or root)
     return;
   }
-  const created = !dav.resolveByPath(segments);
+  const created = !dav.resolveByPath(uid(req), segments);
   const size = Number(req.headers['content-length'] ?? 0);
   const contentType =
     typeof req.headers['content-type'] === 'string' ? req.headers['content-type'] : undefined;
-  await files.writeFileAtPath({
+  await files.writeFileAtPath(uid(req), {
     parentId: target.parent.id,
     name: target.name,
     stream: req,
@@ -114,40 +117,40 @@ async function handlePut(req: Request, res: Response): Promise<void> {
 
 function handleMkcol(req: Request, res: Response): void {
   const segments = dav.splitPath(req.path);
-  const target = dav.resolveParentAndName(segments);
+  const target = dav.resolveParentAndName(uid(req), segments);
   if (!target) {
     res.status(409).end();
     return;
   }
-  if (dav.resolveByPath(segments)) {
+  if (dav.resolveByPath(uid(req), segments)) {
     res.status(405).end(); // already exists
     return;
   }
-  files.createFolder(target.parent.id, target.name);
+  files.createFolder(uid(req), target.parent.id, target.name);
   res.status(201).end();
 }
 
 async function handleDelete(req: Request, res: Response): Promise<void> {
-  const node = dav.resolveByPath(dav.splitPath(req.path));
+  const node = dav.resolveByPath(uid(req), dav.splitPath(req.path));
   if (!node) {
     res.status(404).end();
     return;
   }
-  if (node.id === ROOT_ID) {
+  if (node.parent_id === null) {
     res.status(403).end();
     return;
   }
-  await files.remove(node.id);
+  await files.remove(uid(req), node.id);
   res.status(204).end();
 }
 
 async function handleMove(req: Request, res: Response): Promise<void> {
-  const node = dav.resolveByPath(dav.splitPath(req.path));
+  const node = dav.resolveByPath(uid(req), dav.splitPath(req.path));
   if (!node) {
     res.status(404).end();
     return;
   }
-  if (node.id === ROOT_ID) {
+  if (node.parent_id === null) {
     res.status(403).end();
     return;
   }
@@ -156,26 +159,26 @@ async function handleMove(req: Request, res: Response): Promise<void> {
     res.status(400).end();
     return;
   }
-  const dest = dav.resolveParentAndName(destSegments);
+  const dest = dav.resolveParentAndName(uid(req), destSegments);
   if (!dest) {
     res.status(409).end();
     return;
   }
-  const existingDest = dav.resolveByPath(destSegments);
+  const existingDest = dav.resolveByPath(uid(req), destSegments);
   const created = !existingDest;
   if (existingDest) {
     if (!wantsOverwrite(req)) {
       res.status(412).end();
       return;
     }
-    if (existingDest.id !== node.id) await files.remove(existingDest.id);
+    if (existingDest.id !== node.id) await files.remove(uid(req), existingDest.id);
   }
-  files.relocate(node.id, dest.parent.id, dest.name);
+  files.relocate(uid(req), node.id, dest.parent.id, dest.name);
   res.status(created ? 201 : 204).end();
 }
 
 async function handleCopy(req: Request, res: Response): Promise<void> {
-  const node = dav.resolveByPath(dav.splitPath(req.path));
+  const node = dav.resolveByPath(uid(req), dav.splitPath(req.path));
   if (!node) {
     res.status(404).end();
     return;
@@ -185,18 +188,18 @@ async function handleCopy(req: Request, res: Response): Promise<void> {
     res.status(400).end();
     return;
   }
-  const dest = dav.resolveParentAndName(destSegments);
+  const dest = dav.resolveParentAndName(uid(req), destSegments);
   if (!dest) {
     res.status(409).end();
     return;
   }
   const overwrite = wantsOverwrite(req);
-  const created = !dav.resolveByPath(destSegments);
+  const created = !dav.resolveByPath(uid(req), destSegments);
   if (!created && !overwrite) {
     res.status(412).end();
     return;
   }
-  await files.copyNode(node.id, dest.parent.id, dest.name, overwrite);
+  await files.copyNode(uid(req), node.id, dest.parent.id, dest.name, overwrite);
   res.status(created ? 201 : 204).end();
 }
 
