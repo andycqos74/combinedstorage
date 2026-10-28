@@ -3,17 +3,17 @@ import { api, errorMessage, type BulkResult, type Usage } from '../api';
 import { StorageMeter } from '../components/StorageMeter';
 import { FilePane, type DragPayload } from '../components/FilePane';
 import { FolderPicker } from '../components/FolderPicker';
-import { Toast } from '../components/Toast';
+import { Button, ConfirmDialog, MonoLabel, Toast, type Tone, type ToastMessage } from '../components/ui';
 import { UploadIcon, FolderPlusIcon } from '../components/Icons';
 
-/** Summarize a bulk result, surfacing partial failures rather than silently swallowing them. */
-function reportBulk(result: BulkResult, verb: string): string | null {
-  if (result.failed.length === 0) {
-    return `${result.succeeded.length} item${result.succeeded.length === 1 ? '' : 's'} ${verb}`;
-  }
-  const lines = result.failed.map((f) => `• ${f.name ?? f.id}: ${f.error}`).join('\n');
-  alert(`${result.succeeded.length} item(s) ${verb}, ${result.failed.length} failed:\n\n${lines}`);
-  return null;
+const items = (n: number) => `${n} item${n === 1 ? '' : 's'}`;
+
+/** Toast for a bulk result, surfacing partial failures rather than silently swallowing them. */
+function bulkToast(result: BulkResult, verb: string): ToastMessage {
+  const ok = `${items(result.succeeded.length)} ${verb}`;
+  if (result.failed.length === 0) return { text: ok };
+  const lines = result.failed.map((f) => `${f.name ?? f.id}: ${f.error}`).join('\n');
+  return { text: `${ok}, ${result.failed.length} failed\n${lines}`, tone: 'danger' };
 }
 
 export function Files({
@@ -31,7 +31,8 @@ export function Files({
   const [usage, setUsage] = useState<Usage | null>(null);
   const [busy, setBusy] = useState(false);
   const [picker, setPicker] = useState<'move' | 'copy' | null>(null);
-  const [toast, setToast] = useState('');
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [toast, setToast] = useState<ToastMessage | null>(null);
   const [leftCount, setLeftCount] = useState(0);
   const [leftName, setLeftName] = useState('Home');
 
@@ -39,6 +40,9 @@ export function Files({
   const reloadRight = useRef<() => void>(() => {});
   const uploadLeft = useRef<() => void>(() => {});
   const newFolderLeft = useRef<() => void>(() => {});
+
+  const notify = useCallback((text: string, tone?: Tone) => setToast({ text, tone }), []);
+  const dismissToast = useCallback(() => setToast(null), []);
 
   const refreshUsage = useCallback(async () => {
     try {
@@ -63,47 +67,33 @@ export function Files({
   const clearSelection = () => setSelected(new Set());
   const ids = Array.from(selected);
 
+  async function runBulk(fn: () => Promise<BulkResult>, verb: string) {
+    setBusy(true);
+    try {
+      setToast(bulkToast(await fn(), verb));
+      clearSelection();
+      refreshAll();
+    } catch (err) {
+      notify(errorMessage(err), 'danger');
+    } finally {
+      setBusy(false);
+    }
+  }
+
   // ---- drag and drop between folders/panes --------------------------------
 
   async function handleDrop(payload: DragPayload, destFolderId: string, copy: boolean) {
     // Dropping onto the folder the items already live in is a no-op.
     if (payload.sourceFolderId === destFolderId && !copy) return;
     if (payload.ids.includes(destFolderId)) {
-      alert('A folder cannot be moved into itself.');
+      notify('A folder cannot be moved into itself.', 'danger');
       return;
     }
-    setBusy(true);
-    try {
-      const result = copy
-        ? await api.bulkCopy(payload.ids, destFolderId)
-        : await api.bulkMove(payload.ids, destFolderId);
-      const ok = reportBulk(result, copy ? 'copied' : 'moved');
-      if (ok) setToast(ok);
-      clearSelection();
-      refreshAll();
-    } catch (err) {
-      alert(errorMessage(err));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  // ---- bulk actions -------------------------------------------------------
-
-  async function runBulk(fn: () => Promise<BulkResult>, verb: string, confirmMessage?: string) {
-    if (ids.length === 0) return;
-    if (confirmMessage && !window.confirm(confirmMessage)) return;
-    setBusy(true);
-    try {
-      const ok = reportBulk(await fn(), verb);
-      if (ok) setToast(ok);
-      clearSelection();
-      refreshAll();
-    } catch (err) {
-      alert(errorMessage(err));
-    } finally {
-      setBusy(false);
-    }
+    await runBulk(
+      () =>
+        copy ? api.bulkCopy(payload.ids, destFolderId) : api.bulkMove(payload.ids, destFolderId),
+      copy ? 'copied' : 'moved',
+    );
   }
 
   const backendCount = usage?.backends.length ?? 0;
@@ -111,72 +101,67 @@ export function Files({
   return (
     <div className="page">
       <div className="page-head">
-        <div>
-          <h1 className="page-title">Files</h1>
-          <p className="page-sub">
-            {leftCount} item{leftCount === 1 ? '' : 's'} in {leftName}
-            {backendCount > 0 && ` · spread across ${backendCount} backend${backendCount === 1 ? '' : 's'}`}
+        <div className="page-intro">
+          <h1 className="h1">Files</h1>
+          <p className="body">
+            {items(leftCount)} in {leftName}
+            {backendCount > 0 &&
+              ` · spread across ${backendCount} backend${backendCount === 1 ? '' : 's'}`}
           </p>
         </div>
         <div className="page-actions">
-          <button
-            className={twoPane ? 'toggle-on' : ''}
-            onClick={() => setTwoPane((v) => !v)}
-          >
+          <Button variant={twoPane ? 'primary' : 'secondary'} onClick={() => setTwoPane((v) => !v)}>
             {twoPane ? 'Single pane' : 'Two panes'}
-          </button>
-          <button className="with-icon" onClick={() => newFolderLeft.current()}>
+          </Button>
+          <Button variant="secondary" onClick={() => newFolderLeft.current()}>
             <FolderPlusIcon /> New folder
-          </button>
-          <button className="primary" onClick={() => uploadLeft.current()}>
+          </Button>
+          <Button variant="primary" onClick={() => uploadLeft.current()}>
             <UploadIcon /> Upload
-          </button>
+          </Button>
         </div>
       </div>
 
-      {usage && (
-        <StorageMeter used={usage.used} total={usage.total} backends={usage.backends} />
-      )}
+      {usage && <StorageMeter used={usage.used} total={usage.total} backends={usage.backends} />}
 
       {selected.size > 0 && (
-        <div className="bulkbar">
-          <span className="bulk-count">{selected.size} selected</span>
-          <span className="bulk-divider" />
-          <button disabled={busy} onClick={() => setPicker('move')}>
+        <div className="selection-bar">
+          <MonoLabel>{selected.size} selected</MonoLabel>
+          <span className="selection-divider" />
+          <Button size="sm" disabled={busy} onClick={() => setPicker('move')}>
             Move to…
-          </button>
-          <button disabled={busy} onClick={() => setPicker('copy')}>
+          </Button>
+          <Button size="sm" disabled={busy} onClick={() => setPicker('copy')}>
             Copy to…
-          </button>
-          <button disabled={busy} onClick={() => runBulk(() => api.bulkAlias(ids), 'linked')}>
+          </Button>
+          <Button size="sm" disabled={busy} onClick={() => runBulk(() => api.bulkAlias(ids), 'linked')}>
             Friendly links
-          </button>
+          </Button>
           {twoPane && (
             <>
-              <button disabled={busy} onClick={() => runBulk(() => api.bulkMove(ids, rightFolder), 'moved')}>
+              <Button
+                size="sm"
+                disabled={busy}
+                onClick={() => runBulk(() => api.bulkMove(ids, rightFolder), 'moved')}
+              >
                 Move →
-              </button>
-              <button disabled={busy} onClick={() => runBulk(() => api.bulkCopy(ids, rightFolder), 'copied')}>
+              </Button>
+              <Button
+                size="sm"
+                disabled={busy}
+                onClick={() => runBulk(() => api.bulkCopy(ids, rightFolder), 'copied')}
+              >
                 Copy →
-              </button>
+              </Button>
             </>
           )}
-          <button
-            className="danger-btn"
-            disabled={busy}
-            onClick={() =>
-              runBulk(
-                () => api.bulkDelete(ids),
-                'deleted',
-                `Delete ${selected.size} item(s)? Folders are deleted with everything inside them.`,
-              )
-            }
-          >
+          <Button variant="danger" size="sm" disabled={busy} onClick={() => setConfirmDelete(true)}>
             Delete
-          </button>
-          <button className="link" onClick={clearSelection}>
+          </Button>
+          <span className="spacer" />
+          <Button variant="ghost" size="sm" onClick={clearSelection}>
             Clear
-          </button>
+          </Button>
         </div>
       )}
 
@@ -188,7 +173,7 @@ export function Files({
           onSelectedChange={setSelected}
           onDropNodes={handleDrop}
           onAfterChange={refreshAll}
-          onToast={setToast}
+          onToast={notify}
           registerReload={(fn) => (reloadLeft.current = fn)}
           registerUpload={(fn) => (uploadLeft.current = fn)}
           registerNewFolder={(fn) => (newFolderLeft.current = fn)}
@@ -197,6 +182,7 @@ export function Files({
             setLeftName(name);
           }}
           title={twoPane ? 'Left' : undefined}
+          compact={twoPane}
         />
         {twoPane && (
           <FilePane
@@ -206,17 +192,19 @@ export function Files({
             onSelectedChange={setSelected}
             onDropNodes={handleDrop}
             onAfterChange={refreshAll}
-            onToast={setToast}
+            onToast={notify}
             registerReload={(fn) => (reloadRight.current = fn)}
             title="Right"
+            compact
           />
         )}
       </div>
 
       {picker && (
         <FolderPicker
-          title={`${picker === 'move' ? 'Move' : 'Copy'} ${selected.size} item(s) to…`}
+          title={`${picker === 'move' ? 'Move' : 'Copy'} ${items(selected.size)} to…`}
           actionLabel={picker === 'move' ? 'Move here' : 'Copy here'}
+          excludeIds={selected}
           onCancel={() => setPicker(null)}
           onChoose={(destId) => {
             setPicker(null);
@@ -228,7 +216,20 @@ export function Files({
         />
       )}
 
-      {toast && <Toast message={toast} onDone={() => setToast('')} />}
+      {confirmDelete && (
+        <ConfirmDialog
+          title={`Delete ${items(selected.size)}?`}
+          body="Folders are deleted with everything inside them."
+          action="Delete"
+          onClose={() => setConfirmDelete(false)}
+          onConfirm={async () => {
+            setConfirmDelete(false);
+            await runBulk(() => api.bulkDelete(ids), 'deleted');
+          }}
+        />
+      )}
+
+      {toast && <Toast message={toast} onDone={dismissToast} />}
     </div>
   );
 }

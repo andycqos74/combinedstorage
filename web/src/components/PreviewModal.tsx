@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
 import type { NodeDto } from '../api';
 import { formatBytes } from '../format';
-import { CloseIcon } from './Icons';
+import { backendLabel, backendTone } from '../backends';
+import { FileIcon } from './Icons';
+import { Badge, Button, Dialog } from './ui';
 
 export type PreviewKind = 'image' | 'pdf' | 'video' | 'audio' | 'text' | 'other';
 
@@ -61,7 +63,7 @@ export function thumbnailUrl(node: NodeDto, size = 320): string {
   return `${base}${sep}w=${size}&h=${size}&fit=cover&v=${v.toString(36)}`;
 }
 
-/** Short label for the pill in the preview head, so the type reads at a glance. */
+/** Short label for the kind badge, so the type reads at a glance. */
 const KIND_LABEL: Record<PreviewKind, string> = {
   image: 'Image',
   pdf: 'PDF',
@@ -71,28 +73,41 @@ const KIND_LABEL: Record<PreviewKind, string> = {
   other: 'File',
 };
 
+/** The path part of a file's public link, e.g. "/f/annual-report". */
+export function linkPath(node: NodeDto): string {
+  const link = node.aliasUrl ?? node.url ?? '';
+  try {
+    return new URL(link).pathname;
+  } catch {
+    return link;
+  }
+}
+
+/** Put a file's public link on the clipboard (falling back to a prompt where that is blocked). */
+export async function copyToClipboard(text: string): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    window.prompt('Copy this link:', text);
+  }
+}
+
 export function PreviewModal({
   node,
   onClose,
   onEdit,
+  onToast,
 }: {
   node: NodeDto;
   onClose: () => void;
   onEdit?: (node: NodeDto) => void;
+  onToast?: (message: string) => void;
 }) {
   const kind = previewKind(node);
   const url = versionedUrl(node);
-  const downloadUrl = node.aliasUrl ?? node.url ?? '';
+  const shareUrl = node.aliasUrl ?? node.url ?? '';
   const [text, setText] = useState<string | null>(null);
   const [textError, setTextError] = useState('');
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
 
   useEffect(() => {
     if (kind !== 'text' || !url) return;
@@ -117,48 +132,66 @@ export function PreviewModal({
     };
   }, [kind, url]);
 
+  function download() {
+    const a = document.createElement('a');
+    a.href = shareUrl;
+    a.download = node.name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    onToast?.(`Downloading ${node.name}`);
+  }
+
   return (
-    <div className="modal-backdrop preview" onClick={onClose}>
-      <div className="modal preview-modal" onClick={(e) => e.stopPropagation()}>
-        <div className="preview-head">
-          <div className="name-wrap">
-            <strong>{node.name}</strong>
-            <span className="muted small">
-              {formatBytes(node.size)} · {node.mimeType ?? 'unknown type'}
-            </span>
-          </div>
-          <div className="preview-head-actions">
-            <span className="kind-pill">{KIND_LABEL[kind]}</span>
-            {onEdit && isEditableImage(node) && (
-              <button className="primary" onClick={() => onEdit(node)}>
-                Edit image
-              </button>
-            )}
-            <a className="button" href={downloadUrl} download={node.name}>
-              Download
-            </a>
-            <button className="close-btn" onClick={onClose} aria-label="Close preview">
-              <CloseIcon size={16} />
-            </button>
-          </div>
+    <Dialog title={node.name} onClose={onClose} width={720}>
+      <div className="dialog-body">
+        <div className="preview-meta">
+          <Badge tone="neutral">{KIND_LABEL[kind]}</Badge>
+          {node.backendType && (
+            <Badge tone={backendTone(node.backendType)}>{backendLabel(node.backendType)}</Badge>
+          )}
+          <span className="mono-meta">
+            {formatBytes(node.size)} · {node.mimeType ?? 'unknown type'}
+          </span>
         </div>
 
-        <div className="preview-body">
+        <div className="preview-area">
           {kind === 'image' && <img src={url} alt={node.name} />}
           {kind === 'pdf' && <iframe src={url} title={node.name} />}
           {kind === 'video' && <video src={url} controls autoPlay={false} />}
           {kind === 'audio' && <audio src={url} controls />}
-          {kind === 'text' && (
-            <pre className="preview-text">{textError || text || 'Loading…'}</pre>
-          )}
+          {kind === 'text' && <pre className="preview-text">{textError || text || 'Loading…'}</pre>}
           {kind === 'other' && (
-            <div className="preview-none muted">
-              <div className="preview-none-icon">📄</div>
-              No preview available for this file type. Use Download to open it locally.
+            <div className="preview-none">
+              <FileIcon size={32} />
+              <span>No preview available for this file type. Use Download to open it locally.</span>
             </div>
           )}
         </div>
+
+        <div className="preview-foot">
+          <span className="preview-link">{linkPath(node)}</span>
+          <div className="dialog-actions">
+            {onEdit && isEditableImage(node) && (
+              <Button variant="secondary" onClick={() => onEdit(node)}>
+                Edit image
+              </Button>
+            )}
+            <Button
+              variant="secondary"
+              onClick={async () => {
+                await copyToClipboard(shareUrl);
+                onToast?.('Link copied');
+              }}
+            >
+              Copy link
+            </Button>
+            <Button variant="primary" onClick={download}>
+              Download
+            </Button>
+          </div>
+        </div>
       </div>
-    </div>
+    </Dialog>
   );
 }

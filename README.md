@@ -589,7 +589,9 @@ server/   Express API, storage engine, SQLite metadata
     services/  … · users.ts (accounts, password checks) · backends.ts
     models/    nodes.ts · backends.ts · users.ts        db/  schema · migrate
   test/      Vitest suites
-web/      React + Vite front end (Login / Files / Storage / Account)
+web/      React + Vite front end (Login / Files / Storage / Account), styled on the SolwAI
+          Design System: tokens in web/src/styles/, primitives in web/src/components/ui.tsx,
+          brand fonts in web/public/fonts/, logo mark at web/public/brand/luggage-light.svg
 clients/windows/   rclone + WinFsp mount script for the Windows drive
 ```
 

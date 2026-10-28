@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import FilerobotImageEditor, { TABS, TOOLS } from 'react-filerobot-image-editor';
 import { api, errorMessage, type NodeDto } from '../api';
 import { versionedUrl } from './PreviewModal';
+import { Button, IconButton } from './ui';
+import { CloseIcon } from './Icons';
 
 type Engine = 'filerobot' | 'photopea';
 
@@ -51,8 +53,8 @@ export function ImageEditorModal({
         onSaved();
         onClose();
       } catch (err) {
-        alert(errorMessage(err));
-        setStatus('');
+        // Keep the editor open (and the edit intact) and show why the save failed.
+        setStatus(`Could not save: ${errorMessage(err)}`);
       } finally {
         setSaving(false);
       }
@@ -60,35 +62,42 @@ export function ImageEditorModal({
     [node, onClose, onSaved],
   );
 
+  // No scrim-click or Escape close here: unsaved edits would be lost to a stray click.
   return (
-    <div className="modal-backdrop">
-      <div className="modal editor-modal card" onClick={(e) => e.stopPropagation()}>
-        <div className="preview-head">
-          <div className="name-wrap">
-            <strong>Editing {node.name}</strong>
-            {status && <span className="muted small">{status}</span>}
+    <div className="scrim">
+      <div className="dialog editor" role="dialog" aria-modal="true" aria-label={`Editing ${node.name}`}>
+        <div className="editor-toolbar">
+          <div className="name-stack">
+            <h2 className="dialog-title">Editing {node.name}</h2>
+            {status && (
+              <span className={`mono-meta${status.startsWith('Could not') ? ' text-danger' : ''}`}>
+                {status}
+              </span>
+            )}
           </div>
-          <div className="preview-head-actions">
-            <div className="engine-switch">
-              <button
-                className={engine === 'filerobot' ? 'active' : ''}
+          <div className="dialog-actions">
+            <div className="view-switch" role="group" aria-label="Editor">
+              <Button
+                size="sm"
+                variant={engine === 'filerobot' ? 'secondary' : 'ghost'}
                 onClick={() => setEngine('filerobot')}
                 disabled={saving}
               >
                 Basic
-              </button>
-              <button
-                className={engine === 'photopea' ? 'active' : ''}
+              </Button>
+              <Button
+                size="sm"
+                variant={engine === 'photopea' ? 'secondary' : 'ghost'}
                 onClick={() => setEngine('photopea')}
                 disabled={saving}
                 title="Opens the third-party Photopea editor (advanced: layers, masks, PSD)"
               >
                 Advanced
-              </button>
+              </Button>
             </div>
-            <button className="link" onClick={onClose} disabled={saving}>
-              Close
-            </button>
+            <IconButton label="Close editor" size="sm" onClick={onClose} disabled={saving}>
+              <CloseIcon size={16} />
+            </IconButton>
           </div>
         </div>
 
@@ -217,7 +226,7 @@ function PhotopeaEditor({
 
   return (
     <div className="editor-body photopea">
-      <div className="notice photopea-note">
+      <div className="note">
         Advanced editing runs in <strong>Photopea</strong>, a third-party editor loaded from
         photopea.com (the free version shows ads). Your image is processed in your browser and is
         not uploaded to them. Editing <em>{name}</em>.
@@ -229,12 +238,12 @@ function PhotopeaEditor({
         allow="clipboard-read; clipboard-write"
       />
       <div className="editor-actions">
-        <button disabled={!ready || saving} onClick={() => exportImage(true)}>
+        <Button variant="secondary" disabled={!ready || saving} onClick={() => exportImage(true)}>
           Save as copy
-        </button>
-        <button className="primary" disabled={!ready || saving} onClick={() => exportImage(false)}>
+        </Button>
+        <Button variant="primary" disabled={!ready || saving} onClick={() => exportImage(false)}>
           Save (replaces original)
-        </button>
+        </Button>
       </div>
     </div>
   );

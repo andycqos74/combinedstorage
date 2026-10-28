@@ -1,19 +1,23 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api, errorMessage, type Crumb, type NodeDto } from '../api';
 import { FolderIcon } from './Icons';
+import { Button, Dialog } from './ui';
 
 /**
- * Modal folder browser used to pick a destination for move/copy. Only folders are listed —
- * files are irrelevant as destinations.
+ * Dialog folder browser used to pick a destination for move/copy. Only folders are listed —
+ * files are irrelevant as destinations — and the items being moved are left out, so a folder
+ * cannot be picked as its own destination.
  */
 export function FolderPicker({
   title,
   actionLabel,
+  excludeIds,
   onChoose,
   onCancel,
 }: {
   title: string;
   actionLabel: string;
+  excludeIds?: Set<string>;
   onChoose: (folderId: string) => void;
   onCancel: () => void;
 }) {
@@ -26,54 +30,43 @@ export function FolderPicker({
     setError('');
     try {
       const data = await api.list(folderId);
-      setFolders(data.children.filter((c) => c.type === 'folder'));
+      setFolders(data.children.filter((c) => c.type === 'folder' && !excludeIds?.has(c.id)));
       setBreadcrumb(data.breadcrumb);
     } catch (err) {
       setError(errorMessage(err));
     }
-  }, [folderId]);
+  }, [folderId, excludeIds]);
 
   useEffect(() => {
     load();
   }, [load]);
 
-  // Escape closes the dialog.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onCancel();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onCancel]);
-
   return (
-    <div className="modal-backdrop" onClick={onCancel}>
-      <div className="modal card" onClick={(e) => e.stopPropagation()}>
-        <h3>{title}</h3>
-
+    <Dialog title={title} onClose={onCancel} width={480}>
+      <div className="dialog-body">
         <nav className="crumbs">
           {breadcrumb.map((c, i, arr) => (
-            <span key={c.id}>
+            <span key={c.id} className="crumb-step">
               <button
                 className={`crumb${i === arr.length - 1 ? ' current' : ''}`}
                 onClick={() => setFolderId(c.id)}
               >
                 {c.name}
               </button>
-              {i < arr.length - 1 && <span className="sep">/</span>}
+              {i < arr.length - 1 && <span className="crumb-sep">/</span>}
             </span>
           ))}
         </nav>
 
-        {error && <div className="error">{error}</div>}
+        {error && <div className="banner-error">{error}</div>}
 
         <div className="picker-list">
           {folders.length === 0 ? (
-            <div className="muted small picker-empty">No subfolders here.</div>
+            <span className="picker-empty">No subfolders here.</span>
           ) : (
             folders.map((f) => (
               <button key={f.id} className="picker-row" onClick={() => setFolderId(f.id)}>
-                <span className="file-chip folder">
+                <span className="chip chip-sm folder">
                   <FolderIcon size={14} />
                 </span>
                 {f.name}
@@ -82,13 +75,15 @@ export function FolderPicker({
           )}
         </div>
 
-        <div className="modal-actions">
-          <button onClick={onCancel}>Cancel</button>
-          <button className="primary" onClick={() => onChoose(folderId)}>
+        <div className="dialog-actions">
+          <Button variant="secondary" onClick={onCancel}>
+            Cancel
+          </Button>
+          <Button variant="primary" onClick={() => onChoose(folderId)}>
             {actionLabel}
-          </button>
+          </Button>
         </div>
       </div>
-    </div>
+    </Dialog>
   );
 }

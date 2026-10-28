@@ -1,5 +1,5 @@
 /**
- * Inline SVG icon set: 24x24 viewBox, stroke-width 2, round caps and joins, sized by the caller.
+ * Lucide icon set: 24x24 viewBox, stroke-width 1.75, round caps and joins, sized by the caller.
  * They inherit `currentColor` so a parent's colour rules apply.
  */
 interface IconProps {
@@ -14,7 +14,7 @@ function svgProps(size: number) {
     viewBox: '0 0 24 24',
     fill: 'none',
     stroke: 'currentColor',
-    strokeWidth: 2,
+    strokeWidth: 1.75,
     strokeLinecap: 'round' as const,
     strokeLinejoin: 'round' as const,
     'aria-hidden': true,

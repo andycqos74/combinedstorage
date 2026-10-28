@@ -10,9 +10,16 @@ import React, {
 import ReactDOM from 'react-dom';
 import { api, errorMessage, type ListResponse, type NodeDto } from '../api';
 import { formatBytes } from '../format';
-import { backendLabel, backendPillStyle } from '../backends';
-import { PreviewModal, isEditableImage, hasThumbnail, thumbnailUrl } from './PreviewModal';
-import { FolderIcon, FileIcon, ListIcon, GridIcon, CheckIcon } from './Icons';
+import { backendLabel, backendTone } from '../backends';
+import {
+  PreviewModal,
+  isEditableImage,
+  hasThumbnail,
+  thumbnailUrl,
+  copyToClipboard,
+} from './PreviewModal';
+import { FolderIcon, FileIcon, ListIcon, GridIcon } from './Icons';
+import { Badge, Button, Checkbox, Dialog, IconButton, MonoLabel, PromptDialog, type Tone } from './ui';
 
 // The image editor pulls in a large canvas library, so it is code-split: browsing the file list
 // never downloads it, and it is fetched the first time someone opens an image for editing.
@@ -42,6 +49,30 @@ interface UploadItem {
   error?: string;
 }
 
+/** Mirror of the server's alias slug rules, so the dialog's hint shows the link it will get. */
+function aliasSlug(input: string): string {
+  return input
+    .normalize('NFKD')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9.]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/\.+/g, '.')
+    .replace(/^[-.]+|[-.]+$/g, '');
+}
+
+/** A friendly-link suggestion from a file name: its stem, slugged ("Annual Report.pdf" -> "annual-report"). */
+function suggestedAlias(name: string): string {
+  return aliasSlug(name.replace(/\.[^.]+$/, ''));
+}
+
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
+
+type PaneDialog =
+  | { kind: 'folder' }
+  | { kind: 'rename'; node: NodeDto }
+  | { kind: 'alias'; node: NodeDto };
+
 export function FilePane({
   folderId,
   onNavigate,
@@ -55,6 +86,7 @@ export function FilePane({
   registerNewFolder,
   onSummary,
   title,
+  compact = false,
 }: {
   folderId: string;
   onNavigate: (id: string) => void;
@@ -64,13 +96,15 @@ export function FilePane({
   onDropNodes: (payload: DragPayload, destFolderId: string, copy: boolean) => void;
   /** Called after this pane changes data (upload, new folder, rename…) so siblings refresh. */
   onAfterChange: () => void;
-  onToast?: (message: string) => void;
+  onToast?: (message: string, tone?: Tone) => void;
   registerReload?: (reload: () => void) => void;
   /** Let the page's header buttons drive this pane's upload / new-folder actions. */
   registerUpload?: (fn: () => void) => void;
   registerNewFolder?: (fn: () => void) => void;
   onSummary?: (count: number, folderName: string) => void;
   title?: string;
+  /** Two-pane layout: narrower columns and no per-row actions. */
+  compact?: boolean;
 }) {
   const [data, setData] = useState<ListResponse | null>(null);
   const [error, setError] = useState('');
@@ -79,7 +113,8 @@ export function FilePane({
   const [copied, setCopied] = useState('');
   const [preview, setPreview] = useState<NodeDto | null>(null);
   const [editing, setEditing] = useState<NodeDto | null>(null);
-  // Remembered across visits; a media folder is far easier to work with as a grid.
+  const [dialog, setDialog] = useState<PaneDialog | null>(null);
+  // Remembered across visits and shared by both panes; a media folder is easier as a grid.
   const [view, setView] = useState<'list' | 'grid'>(() =>
     localStorage.getItem('cs.view') === 'grid' ? 'grid' : 'list',
   );
@@ -89,7 +124,15 @@ export function FilePane({
   function changeView(next: 'list' | 'grid') {
     setView(next);
     localStorage.setItem('cs.view', next);
+    window.dispatchEvent(new CustomEvent('cs:view', { detail: next }));
   }
+
+  // View mode is global: follow a change made in the other pane.
+  useEffect(() => {
+    const onView = (e: Event) => setView((e as CustomEvent<'list' | 'grid'>).detail);
+    window.addEventListener('cs:view', onView);
+    return () => window.removeEventListener('cs:view', onView);
+  }, []);
 
   const load = useCallback(async () => {
     setError('');
@@ -110,6 +153,8 @@ export function FilePane({
 
   const children = data?.children ?? [];
   const crumbs = data?.breadcrumb ?? [];
+  // The folder's real id (the API also accepts "root"), so drops onto the pane body work.
+  const currentId = data?.folder.id ?? folderId;
 
   useEffect(() => {
     if (data) onSummary?.(data.children.length, crumbs[crumbs.length - 1]?.name ?? 'Home');
@@ -154,7 +199,7 @@ export function FilePane({
 
   function onDragStart(e: DragEvent, node: NodeDto) {
     const ids = selected.has(node.id) ? Array.from(selected) : [node.id];
-    const payload: DragPayload = { ids, sourceFolderId: folderId };
+    const payload: DragPayload = { ids, sourceFolderId: currentId };
     e.dataTransfer.setData(DRAG_MIME, JSON.stringify(payload));
     e.dataTransfer.effectAllowed = 'copyMove';
   }
@@ -191,6 +236,7 @@ export function FilePane({
 
   const uploadFiles = useCallback(
     async (fileList: FileList | File[], destFolderId = folderId) => {
+      let done = 0;
       for (const file of Array.from(fileList)) {
         const item: UploadItem = { id: crypto.randomUUID(), name: file.name, pct: 0 };
         setUploads((prev) => [...prev, item]);
@@ -201,93 +247,63 @@ export function FilePane({
             ),
           );
           setUploads((prev) => prev.filter((u) => u.id !== item.id));
+          done++;
         } catch (err) {
           setUploads((prev) =>
             prev.map((u) => (u.id === item.id ? { ...u, error: errorMessage(err) } : u)),
           );
         }
       }
+      if (done > 0) onToast?.(`${plural(done, 'item')} uploaded`);
       await load();
       onAfterChange();
     },
-    [folderId, load, onAfterChange],
+    [folderId, load, onAfterChange, onToast],
   );
 
-  const newFolder = useCallback(async () => {
-    const name = window.prompt('New folder name:');
-    if (!name) return;
-    try {
-      await api.createFolder(folderId, name);
-      await load();
-      onAfterChange();
-      onToast?.(`Created “${name}”`);
-    } catch (err) {
-      alert(errorMessage(err));
-    }
-  }, [folderId, load, onAfterChange, onToast]);
+  const openNewFolder = useCallback(() => setDialog({ kind: 'folder' }), []);
 
   // The page header drives this pane's Upload / New folder buttons.
   useEffect(() => {
     registerUpload?.(() => inputRef.current?.click());
-    registerNewFolder?.(newFolder);
-  }, [registerUpload, registerNewFolder, newFolder]);
+    registerNewFolder?.(openNewFolder);
+  }, [registerUpload, registerNewFolder, openNewFolder]);
 
-  async function rename(node: NodeDto) {
-    const name = window.prompt('Rename to:', node.name);
-    if (!name || name === node.name) return;
-    try {
-      await api.rename(node.id, name);
-      await load();
-      onAfterChange();
-    } catch (err) {
-      alert(errorMessage(err));
-    }
-  }
-
-  /** Create, change or clear a file's friendly `/f/<alias>` path. */
-  async function editAlias(node: NodeDto) {
-    let prefill = node.alias ?? '';
-    if (!prefill) {
-      try {
-        prefill = (await api.suggestAlias(node.id)).suggestion;
-      } catch {
-        /* fall back to empty */
-      }
-    }
-    const input = window.prompt(
-      `Friendly link for "${node.name}".\nEdit the path, or clear it to remove the friendly link:`,
-      prefill,
-    );
-    if (input === null) return;
-    try {
-      if (input.trim() === '') {
-        if (node.alias) await api.clearAlias(node.id);
-      } else {
-        await api.setAlias(node.id, input.trim());
-      }
-      await load();
-    } catch (err) {
-      alert(errorMessage(err));
-    }
+  /** Run a change from a dialog; errors are thrown back so the dialog shows them. */
+  async function apply(change: () => Promise<unknown>, toast?: string) {
+    await change();
+    setDialog(null);
+    await load();
+    onAfterChange();
+    if (toast) onToast?.(toast);
   }
 
   async function copyLink(node: NodeDto) {
     const link = node.aliasUrl ?? node.url;
     if (!link) return;
-    try {
-      await navigator.clipboard.writeText(link);
-    } catch {
-      window.prompt('Copy this link:', link);
-    }
+    await copyToClipboard(link);
     setCopied(node.id);
     setTimeout(() => setCopied(''), 1200);
   }
 
+  function open(node: NodeDto) {
+    if (node.type === 'folder') onNavigate(node.id);
+    else setPreview(node);
+  }
+
+  const rowDnD = (node: NodeDto) => ({
+    draggable: true,
+    onDragStart: (e: DragEvent) => onDragStart(e, node),
+    onDragOver: (e: DragEvent) => node.type === 'folder' && onDragOverTarget(e, node.id),
+    onDragLeave: () => dropTarget === node.id && setDropTarget(null),
+    onDrop: (e: DragEvent) => node.type === 'folder' && onDropTarget(e, node.id),
+  });
+
   return (
-    <div className="pane">
-      <div className="toolbar">
-        {title && <span className="pane-title">{title}</span>}
-        <nav className="crumbs">
+    <div className={`pane${compact ? ' compact' : ''}`}>
+      <div className="pane-head">
+        {title && <MonoLabel className="pane-title">{title}</MonoLabel>}
+        <nav className="crumbs" aria-label="Folder path">
           {crumbs.map((c, i, arr) => (
             <span key={c.id} className="crumb-step">
               <button
@@ -301,56 +317,54 @@ export function FilePane({
               >
                 {c.name}
               </button>
-              {i < arr.length - 1 && <span className="sep">/</span>}
+              {i < arr.length - 1 && <span className="crumb-sep">/</span>}
             </span>
           ))}
         </nav>
-        <div className="actions">
-          <div className="view-switch" role="group" aria-label="View mode">
-            <button
-              className={view === 'list' ? 'active' : ''}
-              onClick={() => changeView('list')}
-              title="List view"
-              aria-label="List view"
-            >
-              <ListIcon />
-            </button>
-            <button
-              className={view === 'grid' ? 'active' : ''}
-              onClick={() => changeView('grid')}
-              title="Grid view with thumbnails"
-              aria-label="Grid view"
-            >
-              <GridIcon />
-            </button>
-          </div>
-          <input
-            ref={inputRef}
-            type="file"
-            multiple
-            hidden
-            onChange={(e) => {
-              if (e.target.files?.length) uploadFiles(e.target.files);
-              e.target.value = '';
-            }}
-          />
+        <div className="view-switch" role="group" aria-label="View mode">
+          <IconButton
+            label="List view"
+            size="sm"
+            variant={view === 'list' ? 'secondary' : 'ghost'}
+            onClick={() => changeView('list')}
+          >
+            <ListIcon />
+          </IconButton>
+          <IconButton
+            label="Grid view with thumbnails"
+            size="sm"
+            variant={view === 'grid' ? 'secondary' : 'ghost'}
+            onClick={() => changeView('grid')}
+          >
+            <GridIcon />
+          </IconButton>
         </div>
+        <input
+          ref={inputRef}
+          type="file"
+          multiple
+          hidden
+          onChange={(e) => {
+            if (e.target.files?.length) uploadFiles(e.target.files);
+            e.target.value = '';
+          }}
+        />
       </div>
 
-      {error && <div className="error pane-error">{error}</div>}
+      {error && <div className="banner-error">{error}</div>}
 
       {uploads.length > 0 && (
-        <div className="uploads inpane">
+        <div className="uploads">
           {uploads.map((u) => (
             <div key={u.id} className="upload-row">
-              <span className="name">{u.name}</span>
+              <span className="ellipsis">{u.name}</span>
               {u.error ? (
-                <span className="error-inline">{u.error}</span>
+                <span className="upload-error">{u.error}</span>
               ) : (
                 <>
-                  <span className="pct">{u.pct}%</span>
-                  <span className="progress">
-                    <span className="progress-fill" style={{ width: `${u.pct}%` }} />
+                  <span className="mono-meta">{u.pct}%</span>
+                  <span className="bar">
+                    <span className="bar-fill" style={{ width: `${u.pct}%` }} />
                   </span>
                 </>
               )}
@@ -360,13 +374,16 @@ export function FilePane({
       )}
 
       <div
-        className={`filelist${dropTarget === '' ? ' dragover' : ''}`}
+        className={`pane-body${dropTarget === '' ? ' dragover' : ''}`}
         onDragOver={(e) => onDragOverTarget(e, '')}
         onDragLeave={() => setDropTarget(null)}
-        onDrop={(e) => onDropTarget(e, folderId)}
+        onDrop={(e) => onDropTarget(e, currentId)}
       >
         {children.length === 0 ? (
-          <div className="empty">This folder is empty. Drop files here or use Upload.</div>
+          <div className="empty">
+            <FolderIcon size={28} />
+            <span>This folder is empty. Drop files here or use Upload.</span>
+          </div>
         ) : view === 'grid' ? (
           <div className="tiles">
             {children.map((node) => (
@@ -377,28 +394,16 @@ export function FilePane({
                   (selected.has(node.id) ? ' selected' : '') +
                   (dropTarget === node.id ? ' droptarget' : '')
                 }
-                draggable
-                onDragStart={(e) => onDragStart(e, node)}
-                onDragOver={(e) => node.type === 'folder' && onDragOverTarget(e, node.id)}
-                onDragLeave={() => dropTarget === node.id && setDropTarget(null)}
-                onDrop={(e) => node.type === 'folder' && onDropTarget(e, node.id)}
+                {...rowDnD(node)}
               >
-                <button
-                  className={`tile-check${selected.has(node.id) ? ' on' : ''}`}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    toggle(node, e);
-                  }}
-                  aria-label={`Select ${node.name}`}
-                  aria-pressed={selected.has(node.id)}
-                >
-                  <CheckIcon />
-                </button>
-                <button
-                  className="tile-open"
-                  onClick={() => (node.type === 'folder' ? onNavigate(node.id) : setPreview(node))}
-                  title={node.name}
-                >
+                <span className="tile-check">
+                  <Checkbox
+                    label={`Select ${node.name}`}
+                    checked={selected.has(node.id)}
+                    onChange={(e) => toggle(node, e)}
+                  />
+                </span>
+                <button className="tile-open" onClick={() => open(node)} title={node.name}>
                   <span className={`tile-thumb${node.type === 'folder' ? ' folder' : ''}`}>
                     {node.type === 'folder' ? (
                       <FolderIcon size={30} />
@@ -408,122 +413,145 @@ export function FilePane({
                       <FileIcon size={26} />
                     )}
                   </span>
-                  <span className="tile-name">{node.name}</span>
+                  <span className={`tile-name${node.type === 'folder' ? ' folder' : ''}`}>
+                    {node.name}
+                  </span>
                 </button>
-                <span className="tile-meta">
-                  {node.type === 'file' ? formatBytes(node.size) : 'Folder'}
-                </span>
+                <MonoLabel>{node.type === 'file' ? formatBytes(node.size) : 'Folder'}</MonoLabel>
               </div>
             ))}
           </div>
         ) : (
-          <table>
-            <thead>
-              <tr>
-                <th className="col-check">
-                  <input
-                    type="checkbox"
-                    checked={allSelected}
-                    onChange={toggleAll}
-                    aria-label="Select all"
-                  />
-                </th>
-                <th>Name</th>
-                <th className="col-size">Size</th>
-                <th className="col-backend">Stored on</th>
-                <th className="col-actions">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {children.map((node) => (
-                <tr
-                  key={node.id}
-                  className={
-                    (selected.has(node.id) ? 'selected' : '') +
-                    (dropTarget === node.id ? ' droptarget' : '')
-                  }
-                  draggable
-                  onDragStart={(e) => onDragStart(e, node)}
-                  onDragOver={(e) => node.type === 'folder' && onDragOverTarget(e, node.id)}
-                  onDragLeave={() => dropTarget === node.id && setDropTarget(null)}
-                  onDrop={(e) => node.type === 'folder' && onDropTarget(e, node.id)}
-                >
-                  <td className="col-check">
-                    <input
-                      type="checkbox"
-                      checked={selected.has(node.id)}
-                      onChange={(e) => toggle(node, e)}
-                      onClick={(e) => e.stopPropagation()}
-                      aria-label={`Select ${node.name}`}
-                    />
-                  </td>
-                  <td>
-                    <div className="cell-name">
-                      <span className={`file-chip${node.type === 'folder' ? ' folder' : ''}`}>
-                        {node.type === 'folder' ? <FolderIcon size={16} /> : <FileIcon size={15} />}
+          <div className="list" role="table" aria-label="Files">
+            <div className="list-row list-head" role="row">
+              <Checkbox label="Select all" checked={allSelected} onChange={toggleAll} />
+              <MonoLabel>Name</MonoLabel>
+              <MonoLabel className="align-right">Size</MonoLabel>
+              <MonoLabel className="col-backend">Stored on</MonoLabel>
+              {!compact && <MonoLabel className="align-right col-actions">Actions</MonoLabel>}
+            </div>
+            {children.map((node) => (
+              <div
+                key={node.id}
+                role="row"
+                className={
+                  'list-row list-item' +
+                  (selected.has(node.id) ? ' selected' : '') +
+                  (dropTarget === node.id ? ' droptarget' : '')
+                }
+                {...rowDnD(node)}
+              >
+                <Checkbox
+                  label={`Select ${node.name}`}
+                  checked={selected.has(node.id)}
+                  onChange={(e) => toggle(node, e)}
+                />
+                <div className="cell-name">
+                  <span className={`chip${node.type === 'folder' ? ' folder' : ''}`}>
+                    {node.type === 'folder' ? <FolderIcon size={16} /> : <FileIcon size={15} />}
+                  </span>
+                  <div className="name-stack">
+                    <button
+                      className={`name-btn${node.type === 'folder' ? ' folder' : ''}`}
+                      onClick={() => open(node)}
+                      title={node.name}
+                    >
+                      {node.name}
+                    </button>
+                    {node.type === 'file' && node.alias && (
+                      <span className="alias-line" title={node.aliasUrl ?? ''}>
+                        /f/{node.alias}
                       </span>
-                      <div className="name-wrap">
-                        <button
-                          className={`name-btn${node.type === 'folder' ? ' folder' : ''}`}
-                          onClick={() =>
-                            node.type === 'folder' ? onNavigate(node.id) : setPreview(node)
-                          }
-                        >
-                          {node.name}
-                        </button>
-                        {node.type === 'file' && node.alias && (
-                          <span className="alias-line" title={node.aliasUrl ?? ''}>
-                            /f/{node.alias}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  </td>
-                  <td className="col-size">{node.type === 'file' ? formatBytes(node.size) : '—'}</td>
-                  <td className="col-backend">
-                    {node.type === 'file' && node.backendType ? (
-                      <span className="backend-pill" style={backendPillStyle(node.backendType)}>
-                        {backendLabel(node.backendType)}
-                      </span>
-                    ) : (
-                      <span className="backend-pill neutral">spread</span>
                     )}
-                  </td>
-                  <td className="col-actions">
+                  </div>
+                </div>
+                <span className="cell-size">{node.type === 'file' ? formatBytes(node.size) : '—'}</span>
+                <div className="col-backend">
+                  {node.type === 'file' && node.backendType ? (
+                    <Badge tone={backendTone(node.backendType)}>{backendLabel(node.backendType)}</Badge>
+                  ) : (
+                    <Badge tone="neutral">spread</Badge>
+                  )}
+                </div>
+                {!compact && (
+                  <div className="cell-actions">
                     {node.type === 'file' && (
                       <>
                         {isEditableImage(node) && (
-                          <button className="mini" onClick={() => setEditing(node)}>
+                          <Button variant="ghost" size="sm" onClick={() => setEditing(node)}>
                             Edit
-                          </button>
+                          </Button>
                         )}
-                        <button className="mini" onClick={() => copyLink(node)}>
-                          {copied === node.id ? 'Copied!' : 'Copy link'}
-                        </button>
-                        <button className="mini" onClick={() => editAlias(node)}>
+                        <Button variant="ghost" size="sm" onClick={() => copyLink(node)}>
+                          {copied === node.id ? 'Copied' : 'Copy link'}
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setDialog({ kind: 'alias', node })}
+                        >
                           {node.alias ? 'Edit link' : 'Friendly link'}
-                        </button>
+                        </Button>
                       </>
                     )}
-                    <button className="mini" onClick={() => rename(node)}>
+                    <Button variant="ghost" size="sm" onClick={() => setDialog({ kind: 'rename', node })}>
                       Rename
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                    </Button>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
         )}
       </div>
 
       <div className="pane-hint">
-        Drag items onto a folder or a breadcrumb to move them — hold Ctrl to copy.
+        Drag items onto a folder or a breadcrumb to move them. Hold Ctrl to copy.
       </div>
+
+      {dialog?.kind === 'folder' && (
+        <PromptDialog
+          title="New folder"
+          label="Folder name"
+          action="Create"
+          onClose={() => setDialog(null)}
+          onSubmit={(name) => apply(() => api.createFolder(folderId, name), `Created “${name}”`)}
+        />
+      )}
+      {dialog?.kind === 'rename' && (
+        <PromptDialog
+          title="Rename"
+          label="Name"
+          action="Save"
+          initial={dialog.node.name}
+          onClose={() => setDialog(null)}
+          onSubmit={(name) =>
+            name === dialog.node.name ? setDialog(null) : apply(() => api.rename(dialog.node.id, name))
+          }
+        />
+      )}
+      {dialog?.kind === 'alias' && (
+        <PromptDialog
+          title="Friendly link"
+          label={`Path for ${dialog.node.name}`}
+          action="Save"
+          initial={dialog.node.alias ?? suggestedAlias(dialog.node.name)}
+          hint={(value) => `Opens at /f/${aliasSlug(value) || '…'}`}
+          onClose={() => setDialog(null)}
+          onSubmit={(alias) => apply(() => api.setAlias(dialog.node.id, alias))}
+          extraAction={
+            dialog.node.alias
+              ? { label: 'Remove link', run: () => apply(() => api.clearAlias(dialog.node.id)) }
+              : undefined
+          }
+        />
+      )}
 
       {preview && (
         <PreviewModal
           node={preview}
           onClose={() => setPreview(null)}
+          onToast={(m) => onToast?.(m)}
           onEdit={(n) => {
             setPreview(null);
             setEditing(n);
@@ -534,11 +562,9 @@ export function FilePane({
       {editing && (
         <Suspense
           fallback={
-            <div className="modal-backdrop">
-              <div className="modal">
-                <span className="muted">Loading editor…</span>
-              </div>
-            </div>
+            <Dialog title="Loading editor…" onClose={() => setEditing(null)}>
+              <span className="body-s">Fetching the image editor.</span>
+            </Dialog>
           }
         >
           <ImageEditorModal

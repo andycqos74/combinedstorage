@@ -1,0 +1,31 @@
+:root{
+--font-wordmark:'Quadrillion',sans-serif;
+--font-display:'C64 Keyboard',sans-serif;
+--font-heading:'C64 Keyboard',sans-serif;
+--font-sans:'Figtree',system-ui,sans-serif;
+--font-mono:'IBM Plex Mono',ui-monospace,monospace;
+--weight-house:700;
+--weight-product:200;
+--tracking-house:0.01em;
+--tracking-product:0.06em;
+--tracking-label:0.14em;
+--text-display-xl:48px;
+--text-display-l:36px;
+--text-display-m:27px;
+--text-h1:30px;
+--text-h2:22px;
+--text-h3:18px;
+--text-body-l:17px;
+--text-body:15px;
+--text-body-s:13px;
+--text-label:11px;
+--text-label-s:9px;
+--leading-tight:1;
+--leading-heading:1.2;
+--leading-body:1.55;
+/* Semantic */
+--type-heading-font:var(--font-heading);
+--type-wordmark-font:var(--font-wordmark);
+--type-body-font:var(--font-sans);
+--type-label-font:var(--font-mono);
+}

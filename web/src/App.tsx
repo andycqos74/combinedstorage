@@ -7,6 +7,7 @@ import { Admin } from './pages/Admin';
 import { Account } from './pages/Account';
 import { Wordmark } from './components/Wordmark';
 import { backendColor } from './backends';
+import { IconButton, MonoLabel } from './components/ui';
 import {
   MenuIcon,
   FolderIcon,
@@ -73,7 +74,7 @@ export default function App() {
     });
   }
 
-  if (auth === 'loading') return <div className="center">Loading…</div>;
+  if (auth === 'loading') return <div className="center-screen">Loading…</div>;
   if (auth === 'out') {
     return (
       <Login
@@ -91,46 +92,47 @@ export default function App() {
   }
 
   const pct = usage ? usedPercent(usage.used, usage.total) : 0;
+  const isAdmin = role === 'admin';
+  const navItems: { view: View; label: string; icon: JSX.Element }[] = [
+    { view: 'files', label: 'Files', icon: <FolderIcon size={19} /> },
+    { view: 'admin', label: 'Storage', icon: <DatabaseIcon size={19} /> },
+    { view: 'account', label: isAdmin ? 'Account & users' : 'Account', icon: <UserIcon size={19} /> },
+  ];
 
   return (
     <div className="app">
       <header className="topbar">
-        <div className="brand">
-          <Wordmark />
-        </div>
+        <Wordmark size={0.6} />
 
         <div className="topbar-right">
           {usage && (
-            <div className="pool-chip" title={`${formatBytes(usage.used)} of ${formatBytes(usage.total)}`}>
-              <span className="label">Pool</span>
-              <span className="track">
-                <span className="fill" style={{ width: `${pct}%` }} />
+            <div
+              className="pool"
+              title={`${formatBytes(usage.used)} of ${formatBytes(usage.total)}`}
+            >
+              <MonoLabel>Pool</MonoLabel>
+              <span className="pool-track">
+                <span className="pool-fill" style={{ width: `${pct}%` }} />
               </span>
-              <span className="value">{pct}%</span>
+              <span className="pool-value">{pct}%</span>
             </div>
           )}
+          <span className="vdivider" />
           <div className="topbar-icons">
-            {/* The design calls for a search control; there is no search API yet, so it is
-                shown disabled rather than as a button that silently does nothing. */}
-            <button
-              className="icon-btn"
-              title="Search is not available yet"
-              aria-label="Search (not available yet)"
-              disabled
-            >
+            {/* There is no search API yet, so the control is shown disabled rather than as a
+                button that silently does nothing. */}
+            <IconButton label="Search is not available yet" disabled className="topbar-search">
               <SearchIcon />
-            </button>
-            <button
-              className="icon-btn"
-              title="Sign out"
-              aria-label="Sign out"
+            </IconButton>
+            <IconButton
+              label="Sign out"
               onClick={async () => {
                 await api.logout();
                 setAuth('out');
               }}
             >
               <SignOutIcon />
-            </button>
+            </IconButton>
           </div>
           <button
             className="avatar"
@@ -145,101 +147,96 @@ export default function App() {
 
       <div className="shell">
         <aside className={`sidebar${collapsed ? ' collapsed' : ''}`}>
-          <button
-            className="hamburger"
-            onClick={toggleSidebar}
-            title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-            aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-          >
+          <IconButton label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'} onClick={toggleSidebar}>
             <MenuIcon />
-          </button>
+          </IconButton>
 
           <nav className="nav">
-            <button
-              className={`nav-item${view === 'files' ? ' active' : ''}`}
-              onClick={() => setView('files')}
-              title="Files"
-            >
-              <FolderIcon size={19} />
-              <span>Files</span>
-            </button>
-            <button
-              className={`nav-item${view === 'admin' ? ' active' : ''}`}
-              onClick={() => setView('admin')}
-              title="Storage"
-            >
-              <DatabaseIcon size={19} />
-              <span>Storage</span>
-            </button>
-            <button
-              className={`nav-item${view === 'account' ? ' active' : ''}`}
-              onClick={() => setView('account')}
-              title={role === 'admin' ? 'Account & users' : 'Account'}
-            >
-              <UserIcon size={19} />
-              <span>{role === 'admin' ? 'Account & users' : 'Account'}</span>
-            </button>
+            {navItems.map((item) => (
+              <button
+                key={item.view}
+                className={`nav-item${view === item.view ? ' active' : ''}`}
+                onClick={() => setView(item.view)}
+                title={item.label}
+                aria-current={view === item.view ? 'page' : undefined}
+              >
+                {item.icon}
+                {!collapsed && <span>{item.label}</span>}
+              </button>
+            ))}
           </nav>
 
-          <div className="side-scroll">
-            <div className="side-head">
-              <span className="title">Quick access</span>
-              <button onClick={() => setFilesFolder('root')}>Root</button>
-            </div>
-            {quickFolders.length === 0 ? (
-              <div className="quick-row empty">
-                <span className="name">No folders yet</span>
-              </div>
-            ) : (
-              quickFolders.map((f) => (
-                <button
-                  key={f.id}
-                  className={`quick-row${filesFolder === f.id ? ' active' : ''}`}
-                  onClick={() => {
-                    setView('files');
-                    setFilesFolder(f.id);
-                  }}
-                  title={f.name}
-                >
-                  <FolderIcon size={15} />
-                  <span className="name">{f.name}</span>
-                </button>
-              ))
-            )}
-
-            {usage && usage.backends.length > 0 && (
-              <>
-                <div className="side-head spaced">
-                  <span className="title">Backends</span>
+          {!collapsed && (
+            <div className="side-scroll">
+              <div className="side-group">
+                <div className="side-head">
+                  <MonoLabel>Quick access</MonoLabel>
+                  <button
+                    className="text-btn"
+                    onClick={() => {
+                      setView('files');
+                      setFilesFolder('root');
+                    }}
+                  >
+                    Root
+                  </button>
                 </div>
-                {usage.backends.map((b) => {
-                  const bp = usedPercent(b.used, b.total);
-                  const colour = b.status === 'error' ? 'var(--danger)' : backendColor(b.type);
-                  return (
-                    <div key={b.id} className="side-backend">
-                      <div className="row">
-                        <span className="dot" style={{ background: colour }} />
-                        <span className="name" title={b.name}>
-                          {b.name}
-                        </span>
-                        <span className="pct">{bp}%</span>
+                {quickFolders.length === 0 ? (
+                  <span className="quick-empty">No folders yet</span>
+                ) : (
+                  quickFolders.map((f) => (
+                    <button
+                      key={f.id}
+                      className={`quick-row${view === 'files' && filesFolder === f.id ? ' active' : ''}`}
+                      onClick={() => {
+                        setView('files');
+                        setFilesFolder(f.id);
+                      }}
+                      title={f.name}
+                    >
+                      <FolderIcon size={15} />
+                      <span className="name">{f.name}</span>
+                    </button>
+                  ))
+                )}
+              </div>
+
+              {usage && usage.backends.length > 0 && (
+                <div className="side-backends">
+                  <MonoLabel>Backends</MonoLabel>
+                  {usage.backends.map((b) => {
+                    const bp = usedPercent(b.used, b.total);
+                    return (
+                      <div key={b.id} className="side-backend">
+                        <div className="side-backend-row">
+                          <span
+                            className="dot"
+                            style={{
+                              background: b.status === 'error' ? 'var(--danger)' : backendColor(b.type),
+                            }}
+                          />
+                          <span className="side-backend-name ellipsis" title={b.name}>
+                            {b.name}
+                          </span>
+                          <span className="mono-meta">{bp}%</span>
+                        </div>
+                        <div className="bar">
+                          <div
+                            className={`bar-fill${bp >= 90 ? ' danger' : ''}`}
+                            style={{ width: `${bp}%`, ...(bp < 90 && { background: backendColor(b.type) }) }}
+                          />
+                        </div>
                       </div>
-                      <div className="track">
-                        <div
-                          className="fill"
-                          style={{ width: `${bp}%`, background: bp >= 90 ? 'var(--danger)' : colour }}
-                        />
-                      </div>
-                    </div>
-                  );
-                })}
-              </>
-            )}
-          </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
         </aside>
 
         <main>
-          <div className="content-inner">
+          <div className="content">
             {view === 'files' ? (
               <Files
                 folderId={filesFolder}
@@ -247,13 +244,9 @@ export default function App() {
                 onDataChange={loadShell}
               />
             ) : view === 'admin' ? (
-              <Admin onDataChange={loadShell} isAdmin={role === 'admin'} username={username} />
+              <Admin onDataChange={loadShell} isAdmin={isAdmin} username={username} />
             ) : (
-              <Account
-                username={username}
-                isAdmin={role === 'admin'}
-                onDataChange={loadShell}
-              />
+              <Account username={username} isAdmin={isAdmin} onDataChange={loadShell} />
             )}
           </div>
         </main>

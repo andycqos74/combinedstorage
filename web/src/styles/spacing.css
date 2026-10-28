@@ -1,0 +1,22 @@
+:root{
+--space-1:4px;
+--space-2:8px;
+--space-3:12px;
+--space-4:18px;
+--space-5:24px;
+--space-6:36px;
+--space-7:44px;
+--space-8:64px;
+--radius-sm:3px;
+--radius-md:4px;
+--radius-pill:999px;
+--radius-icon:18px;
+--border-width:1px;
+--tide-stroke:5px;
+--shadow-none:none;
+--shadow-overlay:0 12px 32px oklch(0.25 0.04 235 / 0.14);
+--ease-tide:cubic-bezier(0.33,0,0.2,1); /* @kind other */
+--dur-fast:120ms; /* @kind other */
+--dur-base:220ms; /* @kind other */
+--dur-tide:600ms; /* @kind other */
+}

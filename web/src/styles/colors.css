@@ -1,0 +1,53 @@
+:root{
+/* Core */
+--navy:#0F2B3D;
+--white:#FFFFFF;
+--paper:oklch(0.985 0.003 240);
+--slate-600:oklch(0.45 0.02 240);
+--slate-400:oklch(0.58 0.02 240);
+--hairline:oklch(0.90 0.008 240);
+/* Derived navy tints (for dark surfaces; oklch around navy hue) */
+--navy-800:oklch(0.33 0.045 235);
+--navy-700:oklch(0.40 0.04 235);
+--hairline-on-navy:oklch(0.40 0.035 235);
+--slate-on-navy:oklch(0.78 0.02 235);
+/* Brand accents — on light */
+--solwai-accent:oklch(0.63 0.075 225);
+--organiser-accent:oklch(0.60 0.09 200);
+--luggage-accent:oklch(0.62 0.09 160);
+--patrician-gold:oklch(74% 0.15 80);
+--patrician-purple:oklch(58% 0.20 300);
+/* Brand accents — on navy */
+--solwai-accent-on-navy:oklch(0.78 0.08 225);
+--organiser-accent-on-navy:oklch(0.76 0.10 200);
+--luggage-accent-on-navy:oklch(0.78 0.10 160);
+--patrician-gold-on-navy:oklch(80% 0.16 82);
+--patrician-purple-on-navy:oklch(72% 0.17 300);
+/* Accent washes (derived, for selected/hover fills) */
+--solwai-wash:oklch(0.96 0.02 225);
+--organiser-wash:oklch(0.96 0.025 200);
+--luggage-wash:oklch(0.96 0.025 160);
+--patrician-wash:oklch(0.96 0.03 300);
+/* Semantic status (derived to sit in the accent family) */
+--success:var(--luggage-accent);
+--warning:var(--patrician-gold);
+--danger:oklch(0.58 0.16 25);
+--danger-wash:oklch(0.96 0.025 25);
+--info:var(--solwai-accent);
+
+/* Semantic aliases */
+--ink:var(--navy);
+--accent:var(--solwai-accent);
+--accent-wash:var(--solwai-wash);
+--surface-page:var(--paper);
+--surface-card:var(--white);
+--surface-inverse:var(--navy);
+--surface-sunken:oklch(0.965 0.005 240);
+--text-heading:var(--navy);
+--text-body:var(--slate-600);
+--text-muted:var(--slate-400);
+--text-inverse:var(--white);
+--border-default:var(--hairline);
+--border-strong:oklch(0.80 0.012 240);
+--focus-ring:var(--solwai-accent);
+}

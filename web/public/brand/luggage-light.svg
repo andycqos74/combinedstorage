@@ -1,0 +1,6 @@
+<!-- Luggage mark (light backgrounds): three tide lines, navy / luggage accent / navy. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 82 58" fill="none" stroke-linecap="round">
+  <path d="M7 8H75" stroke="#0F2B3D" stroke-width="7"/>
+  <path d="M17 29H55" stroke="#4E9E7B" stroke-width="7"/>
+  <path d="M35 50H44" stroke="#0F2B3D" stroke-width="7"/>
+</svg>

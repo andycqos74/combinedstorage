@@ -1,28 +1,43 @@
+import type { Tone } from './components/ui';
+
 /**
- * Per-backend colour, shared by the sidebar meters, the storage legend, the "Stored on" pills
- * and the backend cards so a backend reads as the same colour everywhere.
+ * Per-backend colour, shared by the sidebar meters, the storage legend, the "Stored on" badges
+ * and the backend cards so a backend reads as the same colour everywhere. Values are design
+ * tokens; the on-navy set is for the inverse (navy) total card.
  */
 const COLOURS: Record<string, string> = {
-  local: '#1857C4',
-  onedrive: '#2A86F5',
-  googledrive: '#0F9B6C',
+  local: 'var(--navy)',
+  onedrive: 'var(--solwai-accent)',
+  googledrive: 'var(--luggage-accent)',
+};
+
+const COLOURS_ON_NAVY: Record<string, string> = {
+  local: 'var(--white)',
+  onedrive: 'var(--solwai-accent-on-navy)',
+  googledrive: 'var(--luggage-accent-on-navy)',
+};
+
+const TONES: Record<string, Tone> = {
+  local: 'neutral',
+  onedrive: 'info',
+  googledrive: 'success',
 };
 
 export function backendColor(type: string): string {
-  return COLOURS[type] ?? '#5B6B87';
+  return COLOURS[type] ?? 'var(--slate-400)';
+}
+
+export function backendColorOnNavy(type: string): string {
+  return COLOURS_ON_NAVY[type] ?? 'var(--slate-on-navy)';
+}
+
+/** Badge tone for a backend type. */
+export function backendTone(type: string): Tone {
+  return TONES[type] ?? 'neutral';
 }
 
 /** Human label for a backend type. */
 export function backendLabel(type: string): string {
   if (type === 'googledrive') return 'google';
   return type;
-}
-
-/**
- * Pill styling derived from the backend colour: text in the colour, background at 8% and
- * border at 20% (the hex suffixes the design handoff specifies).
- */
-export function backendPillStyle(type: string): React.CSSProperties {
-  const c = backendColor(type);
-  return { color: c, background: `${c}14`, border: `1px solid ${c}33` };
 }
