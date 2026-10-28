@@ -12,30 +12,49 @@ export interface BackendRow {
   enabled: number; // 0 | 1
   quota_total: number | null;
   quota_used: number | null;
+  owner_id: string;
   created_at: string;
 }
 
-export function listBackends(): BackendRow[] {
-  return db.prepare('SELECT * FROM backends ORDER BY created_at ASC').all() as BackendRow[];
+/** A user's backends (all of them, including disabled/errored ones). */
+export function listBackends(ownerId: string): BackendRow[] {
+  return db
+    .prepare('SELECT * FROM backends WHERE owner_id = ? ORDER BY created_at ASC')
+    .all(ownerId) as BackendRow[];
 }
 
-/** Backends eligible to receive/serve data right now. */
-export function listUsableBackends(): BackendRow[] {
+/** A user's backends that are eligible to receive/serve data right now. */
+export function listUsableBackends(ownerId: string): BackendRow[] {
   return db
-    .prepare("SELECT * FROM backends WHERE enabled = 1 AND status = 'connected' ORDER BY created_at ASC")
-    .all() as BackendRow[];
+    .prepare(
+      `SELECT * FROM backends WHERE owner_id = ? AND enabled = 1 AND status = 'connected'
+       ORDER BY created_at ASC`,
+    )
+    .all(ownerId) as BackendRow[];
 }
 
 export function getBackend(id: string): BackendRow | undefined {
   return db.prepare('SELECT * FROM backends WHERE id = ?').get(id) as BackendRow | undefined;
 }
 
-export function createBackend(input: { name: string; type: BackendType; config: unknown }): BackendRow {
+/** A backend, but only if it belongs to the given user. */
+export function getOwnedBackend(ownerId: string, id: string): BackendRow | undefined {
+  return db
+    .prepare('SELECT * FROM backends WHERE id = ? AND owner_id = ?')
+    .get(id, ownerId) as BackendRow | undefined;
+}
+
+export function createBackend(input: {
+  ownerId: string;
+  name: string;
+  type: BackendType;
+  config: unknown;
+}): BackendRow {
   const id = newId();
   db.prepare(
-    `INSERT INTO backends (id, name, type, config, status, enabled, created_at)
-     VALUES (?, ?, ?, ?, 'connected', 1, ?)`,
-  ).run(id, input.name, input.type, JSON.stringify(input.config ?? {}), nowIso());
+    `INSERT INTO backends (id, name, type, config, status, enabled, owner_id, created_at)
+     VALUES (?, ?, ?, ?, 'connected', 1, ?, ?)`,
+  ).run(id, input.name, input.type, JSON.stringify(input.config ?? {}), input.ownerId, nowIso());
   return getBackend(id)!;
 }
 
@@ -65,12 +84,16 @@ export function backendConfig<T = Record<string, unknown>>(row: BackendRow): T {
 }
 
 /**
- * Find an existing backend of the given type for a specific cloud account, so a reconnect
+ * Find a user's existing backend of the given type for a specific cloud account, so a reconnect
  * updates it instead of creating a duplicate. The account is identified by a provider-specific
  * key stored in the config (OneDrive: homeAccountId; Google: accountId).
  */
-export function findBackendByAccount(type: BackendType, accountKey: string): BackendRow | undefined {
-  for (const row of listBackends()) {
+export function findBackendByAccount(
+  ownerId: string,
+  type: BackendType,
+  accountKey: string,
+): BackendRow | undefined {
+  for (const row of listBackends(ownerId)) {
     if (row.type !== type) continue;
     try {
       const cfg = JSON.parse(row.config) as {

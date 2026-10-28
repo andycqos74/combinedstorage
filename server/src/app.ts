@@ -4,13 +4,14 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from './config';
 import { migrate } from './db/migrate';
-import { requireAuth } from './middleware/auth';
+import { requireAuth, requireAdmin, currentUser } from './middleware/auth';
 import { asyncHandler } from './util/asyncHandler';
 import { HttpError } from './util/errors';
 import { authRouter } from './routes/auth';
 import { oauthRouter } from './routes/oauth';
 import { filesRouter } from './routes/files';
-import { adminRouter } from './routes/admin';
+import { backendsRouter } from './routes/backends';
+import { usersRouter } from './routes/users';
 import { cdnRouter } from './routes/cdn';
 import { webdavRouter } from './routes/webdav';
 import { webdavChunksRouter } from './routes/webdavChunks';
@@ -68,16 +69,17 @@ app.use('/f', cdnRouter);
 app.use('/api/oauth', oauthRouter);
 app.use('/api/auth', authRouter);
 
-// --- Everything else under /api requires the admin session ---
+// --- Everything else under /api requires a signed-in user, and acts on their own data ---
 app.use('/api', requireAuth);
 app.get(
   '/api/storage',
-  asyncHandler(async (_req, res) => {
-    res.json(await aggregateQuota());
+  asyncHandler(async (req, res) => {
+    res.json(await aggregateQuota(currentUser(req).id));
   }),
 );
 app.use('/api/files', filesRouter);
-app.use('/api/admin', adminRouter);
+app.use('/api/backends', backendsRouter);
+app.use('/api/users', requireAdmin, usersRouter);
 
 // --- Front end ---
 if (fs.existsSync(config.webDist)) {

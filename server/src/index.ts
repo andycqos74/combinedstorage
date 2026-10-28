@@ -10,6 +10,6 @@ app.listen(config.port, () => {
   }
   if (config.dav.enabled) {
     // eslint-disable-next-line no-console
-    console.log(`WebDAV drive endpoint at /dav (user: ${config.dav.username}).`);
+    console.log('WebDAV drive endpoint at /dav (sign in with your account).');
   }
 });

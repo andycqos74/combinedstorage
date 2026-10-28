@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
-import { api, type NodeDto, type Usage } from './api';
+import { api, type NodeDto, type Role, type Usage } from './api';
 import { formatBytes, usedPercent } from './format';
 import { Login } from './pages/Login';
 import { Files } from './pages/Files';
 import { Admin } from './pages/Admin';
+import { Account } from './pages/Account';
 import { Wordmark } from './components/Wordmark';
 import { backendColor } from './backends';
 import {
@@ -12,10 +13,11 @@ import {
   DatabaseIcon,
   SearchIcon,
   SignOutIcon,
+  UserIcon,
 } from './components/Icons';
 
 type Auth = 'loading' | 'in' | 'out';
-type View = 'files' | 'admin';
+type View = 'files' | 'admin' | 'account';
 
 export default function App() {
   const [auth, setAuth] = useState<Auth>('loading');
@@ -27,17 +29,26 @@ export default function App() {
   const [quickFolders, setQuickFolders] = useState<NodeDto[]>([]);
   // The left pane's folder lives here so the sidebar's quick access can navigate it.
   const [filesFolder, setFilesFolder] = useState('root');
-  const [username, setUsername] = useState('admin');
+  const [username, setUsername] = useState('');
+  const [role, setRole] = useState<Role | null>(null);
+  const [signupEnabled, setSignupEnabled] = useState(false);
 
-  useEffect(() => {
+  /** Who is signed in (if anyone). Re-run after sign-in so the shell shows the right account. */
+  const loadMe = useCallback(() => {
     api
       .me()
       .then((r) => {
+        setUsername(r.username ?? '');
+        setRole(r.role);
+        setSignupEnabled(r.signupEnabled);
         setAuth(r.authenticated ? 'in' : 'out');
-        if (r.username) setUsername(r.username);
       })
       .catch(() => setAuth('out'));
   }, []);
+
+  useEffect(() => {
+    loadMe();
+  }, [loadMe]);
 
   /** Sidebar data: the combined pool and the root's folders for quick access. */
   const loadShell = useCallback(async () => {
@@ -63,7 +74,21 @@ export default function App() {
   }
 
   if (auth === 'loading') return <div className="center">Loading…</div>;
-  if (auth === 'out') return <Login onLogin={() => setAuth('in')} />;
+  if (auth === 'out') {
+    return (
+      <Login
+        signupEnabled={signupEnabled}
+        onLogin={() => {
+          // A different account may sign in than last time: start from its own root.
+          setView('files');
+          setFilesFolder('root');
+          setUsage(null);
+          setQuickFolders([]);
+          loadMe();
+        }}
+      />
+    );
+  }
 
   const pct = usage ? usedPercent(usage.used, usage.total) : 0;
 
@@ -107,9 +132,14 @@ export default function App() {
               <SignOutIcon />
             </button>
           </div>
-          <div className="avatar" aria-hidden="true">
+          <button
+            className="avatar"
+            title={`Signed in as ${username}`}
+            aria-label={`Account (${username})`}
+            onClick={() => setView('account')}
+          >
             {username.charAt(0).toUpperCase()}
-          </div>
+          </button>
         </div>
       </header>
 
@@ -140,6 +170,14 @@ export default function App() {
             >
               <DatabaseIcon size={19} />
               <span>Storage</span>
+            </button>
+            <button
+              className={`nav-item${view === 'account' ? ' active' : ''}`}
+              onClick={() => setView('account')}
+              title={role === 'admin' ? 'Account & users' : 'Account'}
+            >
+              <UserIcon size={19} />
+              <span>{role === 'admin' ? 'Account & users' : 'Account'}</span>
             </button>
           </nav>
 
@@ -208,8 +246,10 @@ export default function App() {
                 onFolderChange={setFilesFolder}
                 onDataChange={loadShell}
               />
+            ) : view === 'admin' ? (
+              <Admin onDataChange={loadShell} isAdmin={role === 'admin'} username={username} />
             ) : (
-              <Admin onDataChange={loadShell} />
+              <Account username={username} isAdmin={role === 'admin'} />
             )}
           </div>
         </main>

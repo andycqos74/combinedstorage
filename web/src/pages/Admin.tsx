@@ -1,10 +1,21 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
-import { api, errorMessage, type BackendUsage, type Usage } from '../api';
+import { api, errorMessage, type BackendUsage, type Usage, type UserSummary } from '../api';
 import { formatBytes, usedPercent } from '../format';
 import { backendLabel, backendPillStyle } from '../backends';
 
-export function Admin({ onDataChange }: { onDataChange: () => void }) {
+/** The signed-in user's own storage backends (admins can also allocate local disk to users). */
+export function Admin({
+  onDataChange,
+  isAdmin,
+  username,
+}: {
+  onDataChange: () => void;
+  isAdmin: boolean;
+  username: string;
+}) {
   const [backends, setBackends] = useState<BackendUsage[]>([]);
+  const [users, setUsers] = useState<UserSummary[]>([]);
+  const [ownerId, setOwnerId] = useState('');
   const [usage, setUsage] = useState<Usage | null>(null);
   const [oneDriveConfigured, setOneDriveConfigured] = useState(false);
   const [googleConfigured, setGoogleConfigured] = useState(false);
@@ -21,10 +32,11 @@ export function Admin({ onDataChange }: { onDataChange: () => void }) {
       setUsage(u);
       setOneDriveConfigured(m.oneDriveConfigured);
       setGoogleConfigured(m.googleDriveConfigured);
+      if (isAdmin) setUsers(await api.users());
     } catch (err) {
       setError(errorMessage(err));
     }
-  }, []);
+  }, [isAdmin]);
 
   useEffect(() => {
     load();
@@ -43,7 +55,7 @@ export function Admin({ onDataChange }: { onDataChange: () => void }) {
     setBusy(true);
     setError('');
     try {
-      await api.addLocal(name.trim(), Math.round(gb * 1024 ** 3));
+      await api.addLocal(name.trim(), Math.round(gb * 1024 ** 3), ownerId || undefined);
       setName('');
       setQuotaGB('1');
       await refresh();
@@ -80,10 +92,10 @@ export function Admin({ onDataChange }: { onDataChange: () => void }) {
     <div className="page">
       <div className="page-head">
         <div>
-          <h1 className="page-title">Storage backends</h1>
+          <h1 className="page-title">Your storage</h1>
           <p className="page-sub">
-            Every enabled backend adds its capacity to one combined pool. New uploads land on
-            whichever backend has room.
+            Every enabled backend you connect adds its capacity to your combined pool. New uploads
+            land on whichever of your backends has room. Other users cannot see your drives.
           </p>
         </div>
       </div>
@@ -160,44 +172,62 @@ export function Admin({ onDataChange }: { onDataChange: () => void }) {
           );
         })}
         {backends.length === 0 && (
-          <div className="muted">No storage backends yet. Add one below to start storing files.</div>
+          <div className="muted">
+            No storage backends yet. Connect a drive below to start storing files.
+          </div>
         )}
       </div>
 
       <div className="add-forms">
-        <form className="card" onSubmit={addLocal}>
-          <h3>Add local disk storage</h3>
-          <p className="muted small">
-            Stores files on the server's disk. The quota is a simulated capacity so you can model a
-            fixed-size drive.
-          </p>
-          <label>
-            Name
-            <input
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="e.g. Local drive A"
-            />
-          </label>
-          <label>
-            Quota (GB)
-            <input
-              type="number"
-              min="0.001"
-              step="0.001"
-              value={quotaGB}
-              onChange={(e) => setQuotaGB(e.target.value)}
-            />
-          </label>
-          <button className="primary" disabled={busy} type="submit">
-            {busy ? 'Adding…' : 'Add local storage'}
-          </button>
-        </form>
+        {isAdmin && (
+          <form className="card" onSubmit={addLocal}>
+            <h3>Add local disk storage</h3>
+            <p className="muted small">
+              Stores files on the server's disk. The quota is a simulated capacity so you can model
+              a fixed-size drive. Only admins can allocate it, to themselves or to another user.
+            </p>
+            <label>
+              For user
+              <select value={ownerId} onChange={(e) => setOwnerId(e.target.value)}>
+                <option value="">Me</option>
+                {users
+                  .filter((u) => u.username !== username)
+                  .map((u) => (
+                    <option key={u.id} value={u.id}>
+                      {u.username}
+                    </option>
+                  ))}
+              </select>
+            </label>
+            <label>
+              Name
+              <input
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="e.g. Local drive A"
+              />
+            </label>
+            <label>
+              Quota (GB)
+              <input
+                type="number"
+                min="0.001"
+                step="0.001"
+                value={quotaGB}
+                onChange={(e) => setQuotaGB(e.target.value)}
+              />
+            </label>
+            <button className="primary" disabled={busy} type="submit">
+              {busy ? 'Adding…' : 'Add local storage'}
+            </button>
+          </form>
+        )}
 
         <div className="card">
           <h3>Connect a cloud backend</h3>
           <p className="muted small">
-            Its capacity joins the combined pool and new uploads can land there automatically.
+            Sign in to your own OneDrive or Google Drive account. Its capacity joins your pool and
+            new uploads can land there automatically.
           </p>
 
           <div className="cloud-connect">
@@ -207,10 +237,7 @@ export function Admin({ onDataChange }: { onDataChange: () => void }) {
                 Connect
               </a>
             ) : (
-              <div className="notice">
-                Not configured — set <code>MS_CLIENT_ID</code> / <code>MS_CLIENT_SECRET</code> in
-                the server <code>.env</code>.
-              </div>
+              <NotConfigured isAdmin={isAdmin} vars={['MS_CLIENT_ID', 'MS_CLIENT_SECRET']} />
             )}
           </div>
 
@@ -221,14 +248,27 @@ export function Admin({ onDataChange }: { onDataChange: () => void }) {
                 Connect
               </a>
             ) : (
-              <div className="notice">
-                Not configured — set <code>GOOGLE_CLIENT_ID</code> /{' '}
-                <code>GOOGLE_CLIENT_SECRET</code> in the server <code>.env</code>.
-              </div>
+              <NotConfigured
+                isAdmin={isAdmin}
+                vars={['GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET']}
+              />
             )}
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+/** Explains why a cloud provider can't be connected: admins get the fix, users who to ask. */
+function NotConfigured({ isAdmin, vars }: { isAdmin: boolean; vars: [string, string] }) {
+  if (!isAdmin) {
+    return <div className="notice">Not available yet — ask your admin to enable it.</div>;
+  }
+  return (
+    <div className="notice">
+      Not configured — set <code>{vars[0]}</code> / <code>{vars[1]}</code> in the server{' '}
+      <code>.env</code>.
     </div>
   );
 }

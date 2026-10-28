@@ -4,6 +4,7 @@ import { asyncHandler } from '../util/asyncHandler';
 import * as chunks from '../services/chunks';
 import * as dav from '../services/webdav';
 import * as files from '../services/files';
+import { currentUser } from '../middleware/auth';
 import { BadRequestError } from '../util/errors';
 
 /**
@@ -22,6 +23,9 @@ import { BadRequestError } from '../util/errors';
 export const webdavChunksRouter = Router();
 
 const ALLOW = 'OPTIONS, PROPFIND, MKCOL, PUT, MOVE, DELETE';
+
+/** Staging-area name for a client-chosen session, namespaced per user so none are shared. */
+const staging = (req: Request, session: string): string => `${currentUser(req).id}.${session}`;
 
 /**
  * Extract the logical file path from a Destination header pointing into the files endpoint,
@@ -47,27 +51,28 @@ async function handleMove(req: Request, res: Response, session: string): Promise
     res.status(400).send('Missing or invalid Destination header.');
     return;
   }
-  const target = dav.resolveParentAndName(segments);
+  const userId = currentUser(req).id;
+  const target = dav.resolveParentAndName(userId, segments);
   if (!target) {
     res.status(409).send('Destination folder does not exist.');
     return;
   }
 
-  const { paths, totalSize } = await chunks.sessionParts(session);
+  const { paths, totalSize } = await chunks.sessionParts(staging(req, session));
   if (paths.length === 0) {
     res.status(400).send('Upload session has no chunks.');
     return;
   }
 
-  const created = !dav.resolveByPath(segments);
+  const created = !dav.resolveByPath(userId, segments);
   // Assemble by streaming the chunks in order; the engine picks a backend using totalSize.
-  await files.writeFileAtPath({
+  await files.writeFileAtPath(userId, {
     parentId: target.parent.id,
     name: target.name,
     stream: chunks.concatStream(paths),
     size: totalSize,
   });
-  await chunks.destroySession(session);
+  await chunks.destroySession(staging(req, session));
   res.status(created ? 201 : 204).end();
 }
 
@@ -94,13 +99,13 @@ webdavChunksRouter.use(
     switch (req.method) {
       case 'MKCOL':
         if (segments.length !== 1) throw new BadRequestError('Invalid upload session path.');
-        await chunks.createSession(session);
+        await chunks.createSession(staging(req, session));
         res.status(201).end();
         return;
 
       case 'PUT':
         if (segments.length !== 2) throw new BadRequestError('Invalid chunk path.');
-        await chunks.writeChunk(session, part, req);
+        await chunks.writeChunk(staging(req, session), part, req);
         res.status(201).end();
         return;
 
@@ -111,12 +116,12 @@ webdavChunksRouter.use(
         return;
 
       case 'DELETE':
-        await chunks.destroySession(session);
+        await chunks.destroySession(staging(req, session));
         res.status(204).end();
         return;
 
       case 'PROPFIND':
-        res.status(chunks.sessionExists(session) ? 207 : 404).end();
+        res.status(chunks.sessionExists(staging(req, session)) ? 207 : 404).end();
         return;
 
       default:

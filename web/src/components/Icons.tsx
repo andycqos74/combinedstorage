@@ -43,6 +43,13 @@ export const DatabaseIcon = ({ size = 18 }: IconProps) => (
   </svg>
 );
 
+export const UserIcon = ({ size = 18 }: IconProps) => (
+  <svg {...svgProps(size)}>
+    <circle cx="12" cy="8" r="4" />
+    <path d="M4 21v-1a6 6 0 0 1 6-6h4a6 6 0 0 1 6 6v1" />
+  </svg>
+);
+
 export const SearchIcon = ({ size = 18 }: IconProps) => (
   <svg {...svgProps(size)}>
     <circle cx="11" cy="11" r="7" />

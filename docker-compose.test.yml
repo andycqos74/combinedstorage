@@ -40,6 +40,8 @@ services:
       PUBLIC_BASE_URL: "${PUBLIC_BASE_URL:-http://localhost:4000}"
       ADMIN_USERNAME: "${ADMIN_USERNAME:-admin}"
       ADMIN_PASSWORD: "${ADMIN_PASSWORD:-changeme}"
+      # Let anyone create an account from the sign-in page (otherwise admins create accounts).
+      ALLOW_SIGNUP: "${ALLOW_SIGNUP:-false}"
       SESSION_SECRET: "${SESSION_SECRET:-please-change-this-to-a-long-random-string}"
       # Plain HTTP on a LAN: the session cookie must NOT require HTTPS or sign-in will fail
       # with no visible error (the browser silently drops the cookie).
@@ -55,7 +57,8 @@ services:
       IMAGE_MAX_CONVERT_MB: "${IMAGE_MAX_CONVERT_MB:-50}"
       IMAGE_CONVERT_ON_DRIVE: "${IMAGE_CONVERT_ON_DRIVE:-true}"
       IMAGE_VARIANTS_ENABLED: "${IMAGE_VARIANTS_ENABLED:-true}"
-      # Windows drive (WebDAV /dav). Credentials default to the admin login above.
+      # Windows drive (WebDAV /dav). Each user signs in with their own account; DAV_USERNAME /
+      # DAV_PASSWORD are an optional extra login for the first admin.
       DAV_ENABLED: "${DAV_ENABLED:-true}"
       DAV_USERNAME: "${DAV_USERNAME:-}"
       DAV_PASSWORD: "${DAV_PASSWORD:-}"

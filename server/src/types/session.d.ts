@@ -2,9 +2,9 @@ import 'express-session';
 
 declare module 'express-session' {
   interface SessionData {
-    /** Admin username once logged in. */
-    user?: string;
-    /** CSRF/anti-forgery state for the OneDrive OAuth round-trip. */
+    /** Id of the signed-in user. */
+    userId?: string;
+    /** CSRF/anti-forgery state for the cloud-drive OAuth round-trip. */
     oauthState?: string;
   }
 }
