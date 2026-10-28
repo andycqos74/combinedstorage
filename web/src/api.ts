@@ -69,6 +69,11 @@ export interface UserSummary {
   usedBytes: number;
 }
 
+export interface Settings {
+  /** Local-disk backends in use. Off: none can be added and existing ones take no new uploads. */
+  localStorageEnabled: boolean;
+}
+
 /** Outcome of a bulk operation: some items may fail without aborting the rest. */
 export interface BulkResult {
   succeeded: string[];
@@ -278,7 +283,11 @@ export const api = {
 
   // The signed-in user's own storage backends.
   meta: () =>
-    req<{ oneDriveConfigured: boolean; googleDriveConfigured: boolean }>('/api/backends/meta'),
+    req<{
+      oneDriveConfigured: boolean;
+      googleDriveConfigured: boolean;
+      localStorageEnabled: boolean;
+    }>('/api/backends/meta'),
   backends: () => req<BackendUsage[]>('/api/backends'),
   /** Admin only. `ownerId` allocates the disk to another user (defaults to the admin). */
   addLocal: (name: string, quotaBytes: number, ownerId?: string) =>
@@ -289,6 +298,11 @@ export const api = {
   setBackendEnabled: (id: string, enabled: boolean) =>
     req<BackendUsage>(`/api/backends/${id}`, { method: 'PATCH', ...jsonBody({ enabled }) }),
   removeBackend: (id: string) => req<{ ok: true }>(`/api/backends/${id}`, { method: 'DELETE' }),
+
+  // Site-wide settings (anyone can read; admin only to change).
+  settings: () => req<Settings>('/api/settings'),
+  updateSettings: (changes: Partial<Settings>) =>
+    req<Settings>('/api/settings', { method: 'PATCH', ...jsonBody(changes) }),
 
   // Account management (admin only).
   users: () => req<UserSummary[]>('/api/users'),

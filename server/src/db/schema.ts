@@ -23,6 +23,12 @@ CREATE TABLE IF NOT EXISTS users (
   created_at    TEXT NOT NULL
 );
 
+-- Site-wide settings an admin can change at runtime (key/value; values are JSON).
+CREATE TABLE IF NOT EXISTS settings (
+  key          TEXT PRIMARY KEY,
+  value        TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS backends (
   id           TEXT PRIMARY KEY,
   name         TEXT NOT NULL,

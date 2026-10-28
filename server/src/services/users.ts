@@ -13,7 +13,7 @@ import {
   setUserRole,
   deleteUserRow,
 } from '../models/users';
-import { listBackends } from '../models/backends';
+import { listBackends, listUsableBackends } from '../models/backends';
 import { listFilesOwnedBy, ownerFileStats, deleteNodeRow } from '../models/nodes';
 import { deleteStoredBytes } from './files';
 import { removeBackend } from './backends';
@@ -190,9 +190,7 @@ export function userSummaries() {
     return {
       ...publicUser(user),
       backendCount: backends.length,
-      capacity: backends
-        .filter((b) => b.enabled && b.status === 'connected')
-        .reduce((sum, b) => sum + (b.quota_total ?? 0), 0),
+      capacity: listUsableBackends(user.id).reduce((sum, b) => sum + (b.quota_total ?? 0), 0),
       fileCount: stats.files,
       usedBytes: stats.bytes,
     };

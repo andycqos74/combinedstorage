@@ -12,6 +12,7 @@ import { oauthRouter } from './routes/oauth';
 import { filesRouter } from './routes/files';
 import { backendsRouter } from './routes/backends';
 import { usersRouter } from './routes/users';
+import { settingsRouter } from './routes/settings';
 import { cdnRouter } from './routes/cdn';
 import { webdavRouter } from './routes/webdav';
 import { webdavChunksRouter } from './routes/webdavChunks';
@@ -80,6 +81,7 @@ app.get(
 app.use('/api/files', filesRouter);
 app.use('/api/backends', backendsRouter);
 app.use('/api/users', requireAdmin, usersRouter);
+app.use('/api/settings', settingsRouter);
 
 // --- Front end ---
 if (fs.existsSync(config.webDist)) {

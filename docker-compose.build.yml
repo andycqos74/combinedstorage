@@ -35,6 +35,8 @@ services:
       ADMIN_PASSWORD: "${ADMIN_PASSWORD:-changeme}"
       # Let anyone create an account from the sign-in page (otherwise admins create accounts).
       ALLOW_SIGNUP: "${ALLOW_SIGNUP:-false}"
+      # Starting value of the admin's "Local disk storage" switch (the in-app choice wins later).
+      LOCAL_STORAGE_ENABLED: "${LOCAL_STORAGE_ENABLED:-true}"
       SESSION_SECRET: "${SESSION_SECRET:-please-change-this-to-a-long-random-string}"
       # Testing over plain HTTP, so the session cookie must not require HTTPS.
       # Set to "true" when serving over HTTPS (e.g. behind a reverse proxy).

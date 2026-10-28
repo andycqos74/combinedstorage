@@ -12,7 +12,7 @@ export function adminId(): string {
 
 /**
  * Clear all tree nodes (except the seeded root), all backends, and every user except the seeded
- * admin between tests.
+ * admin between tests; site settings go back to their defaults.
  */
 export function resetDb(): void {
   db.exec(`
@@ -20,6 +20,7 @@ export function resetDb(): void {
     DELETE FROM backends;
     DELETE FROM nodes WHERE id != 'root';
     DELETE FROM users WHERE root_id != 'root';
+    DELETE FROM settings;
   `);
 }
 

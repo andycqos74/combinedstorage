@@ -6,8 +6,9 @@ import { getUser } from '../models/users';
 import { countFilesOnBackend } from '../models/nodes';
 import { backendUsage } from '../services/quota';
 import { addLocalBackend, removeBackend } from '../services/backends';
+import { localStorageEnabled } from '../models/settings';
 import { currentUser, requireAdmin } from '../middleware/auth';
-import { BadRequestError, NotFoundError } from '../util/errors';
+import { BadRequestError, HttpError, NotFoundError } from '../util/errors';
 
 /** The signed-in user's own storage backends. Nobody can see or change another user's. */
 export const backendsRouter = Router();
@@ -18,6 +19,7 @@ backendsRouter.get('/meta', (_req, res) => {
   res.json({
     oneDriveConfigured: !!config.microsoft,
     googleDriveConfigured: !!config.google,
+    localStorageEnabled: localStorageEnabled(),
   });
 });
 
@@ -37,6 +39,9 @@ backendsRouter.post(
   requireAdmin,
   json,
   asyncHandler(async (req, res) => {
+    if (!localStorageEnabled()) {
+      throw new HttpError(403, 'Local disk storage is turned off. Turn it on under Site settings.');
+    }
     const ownerId = req.body?.ownerId ? String(req.body.ownerId) : currentUser(req).id;
     if (!getUser(ownerId)) throw new BadRequestError('That user does not exist.');
     const backend = addLocalBackend(ownerId, req.body?.name, req.body?.quotaBytes);

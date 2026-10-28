@@ -249,7 +249,11 @@ export default function App() {
             ) : view === 'admin' ? (
               <Admin onDataChange={loadShell} isAdmin={role === 'admin'} username={username} />
             ) : (
-              <Account username={username} isAdmin={role === 'admin'} />
+              <Account
+                username={username}
+                isAdmin={role === 'admin'}
+                onDataChange={loadShell}
+              />
             )}
           </div>
         </main>

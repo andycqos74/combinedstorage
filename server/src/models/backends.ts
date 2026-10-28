@@ -1,5 +1,6 @@
 import { db } from '../db';
 import { newId, nowIso } from '../util/ids';
+import { localStorageEnabled } from './settings';
 
 export type BackendType = 'local' | 'onedrive' | 'googledrive';
 
@@ -23,14 +24,18 @@ export function listBackends(ownerId: string): BackendRow[] {
     .all(ownerId) as BackendRow[];
 }
 
-/** A user's backends that are eligible to receive/serve data right now. */
+/**
+ * A user's backends that are eligible to receive new data and count towards their pool right
+ * now. Local disks are left out while an admin has local storage switched off.
+ */
 export function listUsableBackends(ownerId: string): BackendRow[] {
   return db
     .prepare(
       `SELECT * FROM backends WHERE owner_id = ? AND enabled = 1 AND status = 'connected'
+         AND (type != 'local' OR ?)
        ORDER BY created_at ASC`,
     )
-    .all(ownerId) as BackendRow[];
+    .all(ownerId, localStorageEnabled() ? 1 : 0) as BackendRow[];
 }
 
 export function getBackend(id: string): BackendRow | undefined {

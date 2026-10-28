@@ -19,6 +19,7 @@ export function Admin({
   const [usage, setUsage] = useState<Usage | null>(null);
   const [oneDriveConfigured, setOneDriveConfigured] = useState(false);
   const [googleConfigured, setGoogleConfigured] = useState(false);
+  const [localOn, setLocalOn] = useState(true);
   const [name, setName] = useState('');
   const [quotaGB, setQuotaGB] = useState('1');
   const [error, setError] = useState('');
@@ -32,6 +33,7 @@ export function Admin({
       setUsage(u);
       setOneDriveConfigured(m.oneDriveConfigured);
       setGoogleConfigured(m.googleDriveConfigured);
+      setLocalOn(m.localStorageEnabled);
       if (isAdmin) setUsers(await api.users());
     } catch (err) {
       setError(errorMessage(err));
@@ -86,7 +88,8 @@ export function Admin({
   }
 
   const pct = usage ? usedPercent(usage.used, usage.total) : 0;
-  const enabledCount = backends.filter((b) => b.enabled).length;
+  // Paused local disks (local storage switched off) don't count as enabled.
+  const enabledCount = backends.filter((b) => b.enabled && (b.type !== 'local' || localOn)).length;
 
   return (
     <div className="page">
@@ -139,8 +142,10 @@ export function Admin({
       <div className="backend-grid">
         {backends.map((b) => {
           const bp = usedPercent(b.used, b.total);
+          // A local disk is paused (no new uploads, not in the pool) while local storage is off.
+          const paused = b.type === 'local' && !localOn;
           return (
-            <div key={b.id} className={`card backend${b.enabled ? '' : ' disabled'}`}>
+            <div key={b.id} className={`card backend${b.enabled && !paused ? '' : ' disabled'}`}>
               <div className="backend-head">
                 <span className="backend-name">{b.name}</span>
                 <span className="backend-pill" style={backendPillStyle(b.type)}>
@@ -158,6 +163,7 @@ export function Admin({
                 {b.status === 'error' && (
                   <span className="error-inline"> · connection error</span>
                 )}
+                {paused && <span> · paused: local storage is turned off</span>}
               </div>
               <div className="backend-actions">
                 <label className="switch">
@@ -179,7 +185,16 @@ export function Admin({
       </div>
 
       <div className="add-forms">
-        {isAdmin && (
+        {isAdmin && !localOn && (
+          <div className="card">
+            <h3>Local disk storage</h3>
+            <div className="notice">
+              Turned off. Turn it on under <strong>Account &amp; users → Site settings</strong> to
+              add local disks or use existing ones again.
+            </div>
+          </div>
+        )}
+        {isAdmin && localOn && (
           <form className="card" onSubmit={addLocal}>
             <h3>Add local disk storage</h3>
             <p className="muted small">

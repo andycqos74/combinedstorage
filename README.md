@@ -318,6 +318,7 @@ means regenerating the credentials in Azure / Google Cloud.
 | `DATA_DIR` | SQLite DB + local blobs (relative to `server/`, or an absolute path) | `./data` |
 | `ADMIN_USERNAME` / `ADMIN_PASSWORD` | First admin account, created only when the database has no users | `admin` / `changeme` |
 | `ALLOW_SIGNUP` | Let anyone create an account from the sign-in page | `false` |
+| `LOCAL_STORAGE_ENABLED` | Starting value of the admin's *Local disk storage* switch (the choice saved in the app wins once changed) | `true` |
 | `SESSION_SECRET` | Signs the session cookie — set a long random value | _dev placeholder_ |
 | `COOKIE_SECURE` | Require HTTPS for the session cookie | on when `NODE_ENV=production` |
 | `AUTO_ALIAS_ON_UPLOAD` | Auto-generate a friendly alias for every upload | `false` |
@@ -533,7 +534,11 @@ invisible (asking for one by id answers 404).
   Google address as a test user (or publish the app); refresh tokens issued in Testing expire after
   7 days.
 - **Local disk** uses the server's own storage, so only admins can create it, for themselves or for
-  any user (*For user* on the Storage page).
+  any user (*For user* on the Storage page). An admin can switch local disk storage **on or off for
+  the whole site** under **Account & users → Site settings**. While it is off, no local disks can be
+  added, and existing ones take no new uploads and drop out of every user's pool. Files already on
+  them stay readable, so they can still be opened, moved or deleted. Turning it back on resumes
+  them. It is on by default.
 - **WebDAV:** each user mounts the drive with their own login and sees only their own tree.
 
 ## API overview
@@ -558,6 +563,7 @@ backends are admin-only. `/f/:token` is public.
 | `PATCH /api/backends/:id` · `DELETE /api/backends/:id` | Enable/disable, remove one of yours |
 | `GET /api/oauth/onedrive/start` · `GET /api/oauth/google/start` → callbacks | Connect a cloud drive to your account |
 | `GET /api/users` · `POST /api/users` · `PATCH /api/users/:id` · `DELETE /api/users/:id` | Accounts (admin) |
+| `GET /api/settings` · `PATCH /api/settings` | Site settings, e.g. `localStorageEnabled` (changing them is admin-only) |
 | `GET /f/:token` | Public file (CDN), supports Range |
 | `PROPFIND/GET/PUT/MKCOL/DELETE/MOVE/COPY … /dav/*` | WebDAV drive (own Basic auth) |
 | `… /remote.php/dav/files/:user/*` · `/remote.php/dav/uploads/:user/*` | Same drive, Nextcloud-shaped, with chunked uploads |

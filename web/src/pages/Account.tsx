@@ -1,8 +1,19 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
-import { api, errorMessage, type Role, type UserSummary } from '../api';
+import { api, errorMessage, type Role, type Settings, type UserSummary } from '../api';
 import { formatBytes } from '../format';
 
-export function Account({ username, isAdmin }: { username: string; isAdmin: boolean }) {
+export function Account({
+  username,
+  isAdmin,
+  onDataChange,
+}: {
+  username: string;
+  isAdmin: boolean;
+  onDataChange: () => void;
+}) {
+  // Bumped when a site setting changes, so the user list re-reads capacities that depend on it.
+  const [settingsVersion, setSettingsVersion] = useState(0);
+
   return (
     <div className="page">
       <div className="page-head">
@@ -27,7 +38,15 @@ export function Account({ username, isAdmin }: { username: string; isAdmin: bool
         </div>
       </div>
 
-      {isAdmin && <Users currentUsername={username} />}
+      {isAdmin && (
+        <SiteSettings
+          onChange={() => {
+            setSettingsVersion((v) => v + 1);
+            onDataChange();
+          }}
+        />
+      )}
+      {isAdmin && <Users key={settingsVersion} currentUsername={username} />}
     </div>
   );
 }
@@ -96,6 +115,68 @@ function ChangePassword() {
         {busy ? 'Saving…' : 'Change password'}
       </button>
     </form>
+  );
+}
+
+/** Admin-only: switches that apply to every user. */
+function SiteSettings({ onChange }: { onChange: () => void }) {
+  const [settings, setSettings] = useState<Settings | null>(null);
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    api.settings().then(setSettings, (err) => setError(errorMessage(err)));
+  }, []);
+
+  async function toggleLocal() {
+    if (!settings) return;
+    const next = !settings.localStorageEnabled;
+    if (
+      !next &&
+      !window.confirm(
+        'Turn off local disk storage? Existing local disks stop taking new uploads and leave ' +
+          'every user’s pool. Files already on them stay readable, so they can be moved or deleted.',
+      )
+    ) {
+      return;
+    }
+    setBusy(true);
+    setError('');
+    try {
+      setSettings(await api.updateSettings({ localStorageEnabled: next }));
+      onChange();
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="card">
+      <h3>Site settings</h3>
+      {error && <div className="error">{error}</div>}
+      {settings && (
+        <div className="setting-row">
+          <div>
+            <strong>Local disk storage</strong>
+            <p className="muted small">
+              Lets admins allocate space on this server's disk to users. Turn it off to have
+              everyone store files only on the cloud drives they connect.
+            </p>
+          </div>
+          <label className="switch">
+            <input
+              type="checkbox"
+              checked={settings.localStorageEnabled}
+              disabled={busy}
+              onChange={toggleLocal}
+            />
+            {settings.localStorageEnabled ? 'On' : 'Off'}
+          </label>
+        </div>
+      )}
+    </div>
   );
 }
 

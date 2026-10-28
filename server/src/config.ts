@@ -68,6 +68,9 @@ export const config = {
   },
   // Let anyone create an account from the sign-in page. Off by default: admins create accounts.
   allowSignup: (process.env.ALLOW_SIGNUP ?? '').toLowerCase() === 'true',
+  // Initial value of the admin's "local disk storage" switch, used until an admin changes it in
+  // the app (the saved choice then wins).
+  localStorageDefault: (process.env.LOCAL_STORAGE_ENABLED ?? 'true').toLowerCase() !== 'false',
   // WebDAV drive endpoint (/dav). Enabled by default; every user signs in with their own login.
   dav: {
     enabled: (process.env.DAV_ENABLED ?? 'true').toLowerCase() !== 'false',
